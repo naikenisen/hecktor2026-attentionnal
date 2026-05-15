@@ -1,7 +1,11 @@
+import shutil
 import SimpleITK as sitk
 import numpy as np
+import nibabel as nib
 import torch
 import warnings
+from pathlib import Path
+from tqdm import tqdm
 from skimage.measure import label
 
 from monai.transforms import (
@@ -195,7 +199,7 @@ def get_preprocessing_transforms(keys, final_size=(200, 200, 310)):
 # Applique le pipeline MONAI de preprocessing sur des volumes SimpleITK déjà en mémoire
 def apply_monai_transforms(ct_sitk: sitk.Image,
                             pt_sitk: sitk.Image,
-                            final_size=(310, 200, 200)):
+                            final_size=(200, 200, 310)):
     # Conversion CT SimpleITK → MetaTensor MONAI
     ct_mt = sitk_to_metatensor(ct_sitk)
     # Conversion PET SimpleITK → MetaTensor MONAI
@@ -216,3 +220,61 @@ def apply_monai_transforms(ct_sitk: sitk.Image,
     meta = ct_proc.meta
 
     return ct_proc, pet_proc, meta
+
+
+def main() -> None:
+    input_dir  = Path("/work/imvia/in156281/datasets/hecktor_dataset")
+    output_dir = Path("/work/imvia/in156281/datasets/hecktor_dataset_preprocessed")
+
+    patient_dirs = sorted(d for d in input_dir.iterdir() if d.is_dir())
+    print(f"{len(patient_dirs)} patients trouvés dans {input_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    errors = []
+    for pdir in tqdm(patient_dirs, desc="Preprocessing"):
+        pid     = pdir.name
+        ct_path = pdir / f"{pid}__CT.nii.gz"
+        pt_path = pdir / f"{pid}__PT.nii.gz"
+        lbl_path = pdir / f"{pid}.nii.gz"
+
+        if not ct_path.exists() or not pt_path.exists():
+            print(f"  [{pid}] CT ou PT manquant, ignoré")
+            continue
+
+        try:
+            out_pdir = output_dir / pid
+            out_pdir.mkdir(parents=True, exist_ok=True)
+
+            ct_sitk, pt_sitk, _       = resample_images(str(ct_path), str(pt_path))
+            ct_crop, pt_crop, _, _    = crop_neck_region_sitk(ct_sitk, pt_sitk)
+            ct_proc, pet_proc, _      = apply_monai_transforms(ct_crop, pt_crop)
+
+            ct_affine  = np.array(ct_proc.meta.get("affine",  np.eye(4)))
+            pet_affine = np.array(pet_proc.meta.get("affine", np.eye(4)))
+
+            nib.save(
+                nib.Nifti1Image(ct_proc.numpy().squeeze(0),  ct_affine),
+                str(out_pdir / f"{pid}__CT.nii.gz"),
+            )
+            nib.save(
+                nib.Nifti1Image(pet_proc.numpy().squeeze(0), pet_affine),
+                str(out_pdir / f"{pid}__PT.nii.gz"),
+            )
+
+            if lbl_path.exists():
+                shutil.copy(str(lbl_path), str(out_pdir / f"{pid}.nii.gz"))
+
+        except Exception as exc:
+            errors.append((pid, exc))
+            print(f"  [{pid}] ERREUR : {exc}")
+
+    print(f"\nTerminé — {len(patient_dirs) - len(errors)}/{len(patient_dirs)} traités")
+    print(f"Résultats dans : {output_dir}")
+    if errors:
+        print(f"{len(errors)} erreur(s) :")
+        for pid, exc in errors:
+            print(f"  {pid}: {exc}")
+
+
+if __name__ == "__main__":
+    main()
