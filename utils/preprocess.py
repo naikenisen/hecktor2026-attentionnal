@@ -200,7 +200,7 @@ def crop_neck_region_sitk(
 def get_preprocessing_transforms(keys, final_size=(200, 200, 310)):
     return Compose([
         # Réorientation vers le repère RAS standard
-        Orientationd(keys=keys, axcodes="RAS"),
+        Orientationd(keys=keys, axcodes="RAS", labels=None),
         # Mise à l'échelle CT dans [−6, 6] en clampant à [−250, 250] HU
         ScaleIntensityRanged(
             keys=["ct"], a_min=-250, a_max=250, b_min=-6.0, b_max=6.0, clip=True
