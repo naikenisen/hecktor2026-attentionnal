@@ -30,23 +30,29 @@ def sitk_to_metatensor(img_sitk: sitk.Image) -> MetaTensor:
     # Ajout de la dimension canal : [1, Z, Y, X]
     arr = arr[None, ...]
 
-    # Espacement voxel (sx, sy, sz)
-    spacing = img_sitk.GetSpacing()
-    # Origine physique de l'image
-    origin = img_sitk.GetOrigin()
-    # Matrice de direction en tuple row-major (9 valeurs)
-    direction = img_sitk.GetDirection()
+    spacing   = np.array(img_sitk.GetSpacing())                    # (sx, sy, sz) en LPS
+    origin    = np.array(img_sitk.GetOrigin())                     # (ox, oy, oz) en LPS
+    direction = np.array(img_sitk.GetDirection()).reshape(3, 3)    # 3×3 cosinus directeurs LPS
 
-    # Matrice affine 4×4 encodant l'orientation et la résolution
+    # Affine LPS pour des indices voxel en ordre (x, y, z)
+    A_lps = direction * spacing  # colonne j = direction[:,j] * spacing[j]
+
+    # Conversion LPS → RAS : inverser les lignes x et y (et l'origine correspondante)
+    # SimpleITK suit la convention DICOM (LPS) ; nibabel/MONAI utilisent RAS
+    lps_to_ras = np.array([-1.0, -1.0, 1.0])
+    A_ras      = A_lps * lps_to_ras[:, np.newaxis]
+    origin_ras = origin * lps_to_ras
+
+    # Inverser les colonnes pour tenir compte de l'ordre (Z, Y, X) du tableau numpy
+    # (sitk.GetArrayFromImage retourne [z, y, x] mais l'affine LPS suppose [x, y, z])
     affine = np.eye(4, dtype=np.float64)
-    affine[:3, :3] = np.reshape(direction, (3, 3)) * spacing
-    affine[:3, 3] = origin
+    affine[:3, :3] = A_ras[:, ::-1]
+    affine[:3, 3]  = origin_ras
 
-    # Dictionnaire de métadonnées spatiales attaché au MetaTensor
     meta = {
-        "spacing":   spacing,
-        "origin":    origin,
-        "direction": direction,
+        "spacing":   tuple(img_sitk.GetSpacing()),
+        "origin":    tuple(img_sitk.GetOrigin()),
+        "direction": tuple(img_sitk.GetDirection()),
         "affine":    affine,
     }
     return MetaTensor(arr, meta=meta)
