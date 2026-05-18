@@ -1,24 +1,11 @@
-# Core deep learning
 torch
-
-# Medical imaging
 monai
 nibabel
 SimpleITK
 scikit-image
-
-# Data processing
-numpy
-pandas
-
-# Survival analysis
+numpy<2.0
+pandas<2.0
 lifelines
-
-# ML utilities
 scikit-learn
-
-# Visualization & logging
 tensorboard
-
-# Utilities
 tqdm
