@@ -1,8 +1,8 @@
 #!/bin/ksh 
 #$ -q batch
-#$ -o train.out
+#$ -o preprocess.out
 #$ -j y
-#$ -N train
+#$ -N preprocess
 
 set -e
 
