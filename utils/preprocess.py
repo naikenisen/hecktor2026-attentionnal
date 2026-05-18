@@ -1,4 +1,5 @@
-import shutil
+import concurrent.futures
+import multiprocessing
 import SimpleITK as sitk
 import numpy as np
 import nibabel as nib
@@ -70,8 +71,8 @@ def get_bounding_boxes(ct_sitk, pet_sitk):
     ], axis=0)
 
 
-# Rééchantillonne CT et PET à 1 mm³ isotrope dans leur bounding box commune
-def resample_images(ct_path, pet_path):
+# Rééchantillonne CT, PET et optionnellement le label à 1 mm³ isotrope dans leur bounding box commune
+def resample_images(ct_path, pet_path, lbl_path=None):
     # Résolution cible isotrope en mm
     resampling = [1, 1, 1]
     # Filtre de rééchantillonnage SimpleITK configuré une seule fois
@@ -94,7 +95,14 @@ def resample_images(ct_path, pet_path):
     # PET rééchantillonné
     pt = resampler.Execute(pt)
 
-    return ct, pt, bb
+    lbl = None
+    if lbl_path is not None:
+        lbl = sitk.ReadImage(lbl_path)
+        # NearestNeighbor pour préserver les valeurs entières du masque de segmentation
+        resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+        lbl = resampler.Execute(lbl)
+
+    return ct, pt, bb, lbl
 
 
 # Trouve le centre de la région haute intensité dans la partie supérieure du PET
@@ -136,10 +144,11 @@ def get_roi_center(pet_tensor, z_top_fraction=0.75, z_score_threshold=1.0):
     return center_full_image.astype(int)
 
 
-# Recadre CT et PET autour de la région cou/tête via une boîte centrée sur le ROI PET
+# Recadre CT, PET et optionnellement le label autour de la région cou/tête via une boîte centrée sur le ROI PET
 def crop_neck_region_sitk(
         ct_sitk:  sitk.Image,
         pet_sitk: sitk.Image,
+        lbl_sitk: sitk.Image = None,
         crop_box_size=(200, 200, 310),
         z_top_fraction=0.75,
         z_score_threshold=1.0,
@@ -174,8 +183,10 @@ def crop_neck_region_sitk(
     ct_crop = sitk.RegionOfInterest(ct_sitk, size=size, index=index)
     # PET recadré de façon identique
     pet_crop = sitk.RegionOfInterest(pet_sitk, size=size, index=index)
+    # Label recadré avec le même index/size pour rester aligné sur CT/PET
+    lbl_crop = sitk.RegionOfInterest(lbl_sitk, size=size, index=index) if lbl_sitk is not None else None
 
-    return ct_crop, pet_crop, box_start, box_end
+    return ct_crop, pet_crop, lbl_crop, box_start, box_end
 
 
 # Construit la séquence de transforms MONAI pour le preprocessing déterministe
@@ -199,6 +210,7 @@ def get_preprocessing_transforms(keys, final_size=(200, 200, 310)):
 # Applique le pipeline MONAI de preprocessing sur des volumes SimpleITK déjà en mémoire
 def apply_monai_transforms(ct_sitk: sitk.Image,
                             pt_sitk: sitk.Image,
+                            lbl_sitk: sitk.Image = None,
                             final_size=(200, 200, 310)):
     # Conversion CT SimpleITK → MetaTensor MONAI
     ct_mt = sitk_to_metatensor(ct_sitk)
@@ -206,9 +218,14 @@ def apply_monai_transforms(ct_sitk: sitk.Image,
     pet_mt = sitk_to_metatensor(pt_sitk)
     # Dictionnaire d'entrée pour le Compose MONAI
     data = {"ct": ct_mt, "pet": pet_mt}
+    keys = ["ct", "pet"]
 
-    # Pipeline de preprocessing déterministe
-    xforms = get_preprocessing_transforms(keys=["ct", "pet"], final_size=final_size)
+    if lbl_sitk is not None:
+        data["label"] = sitk_to_metatensor(lbl_sitk)
+        keys = ["ct", "pet", "label"]
+
+    # Pipeline de preprocessing déterministe (Orientationd, CropForegroundd, SpatialPadd appliqués à toutes les keys)
+    xforms = get_preprocessing_transforms(keys=keys, final_size=final_size)
     # Application des transforms
     out = xforms(data)
 
@@ -218,57 +235,90 @@ def apply_monai_transforms(ct_sitk: sitk.Image,
     pet_proc = out["pet"]
     # Métadonnées spatiales du CT après preprocessing
     meta = ct_proc.meta
+    lbl_proc = out["label"] if lbl_sitk is not None else None
 
-    return ct_proc, pet_proc, meta
+    return ct_proc, pet_proc, lbl_proc, meta
+
+
+def process_patient(args):
+    """Traite un patient : rééchantillonnage, recadrage, preprocessing MONAI et sauvegarde."""
+    pdir, output_dir = args
+    pid      = pdir.name
+    ct_path  = pdir / f"{pid}__CT.nii.gz"
+    pt_path  = pdir / f"{pid}__PT.nii.gz"
+    lbl_path = pdir / f"{pid}.nii.gz"
+
+    if not ct_path.exists() or not pt_path.exists():
+        return pid, "missing"
+
+    try:
+        out_pdir = output_dir / pid
+        out_pdir.mkdir(parents=True, exist_ok=True)
+
+        has_label = lbl_path.exists()
+        ct_sitk, pt_sitk, _, lbl_sitk = resample_images(
+            str(ct_path), str(pt_path),
+            str(lbl_path) if has_label else None,
+        )
+        ct_crop, pt_crop, lbl_crop, _, _ = crop_neck_region_sitk(ct_sitk, pt_sitk, lbl_sitk)
+        ct_proc, pet_proc, lbl_proc, _   = apply_monai_transforms(ct_crop, pt_crop, lbl_crop)
+
+        ct_affine  = np.array(ct_proc.meta.get("affine",  np.eye(4)))
+        pet_affine = np.array(pet_proc.meta.get("affine", np.eye(4)))
+
+        nib.save(
+            nib.Nifti1Image(ct_proc.numpy().squeeze(0), ct_affine),
+            str(out_pdir / f"{pid}__CT.nii.gz"),
+        )
+        nib.save(
+            nib.Nifti1Image(pet_proc.numpy().squeeze(0), pet_affine),
+            str(out_pdir / f"{pid}__PT.nii.gz"),
+        )
+
+        if has_label and lbl_proc is not None:
+            lbl_affine = np.array(lbl_proc.meta.get("affine", np.eye(4)))
+            nib.save(
+                nib.Nifti1Image(lbl_proc.numpy().squeeze(0).astype(np.uint8), lbl_affine),
+                str(out_pdir / f"{pid}.nii.gz"),
+            )
+
+        return pid, None
+
+    except Exception as exc:
+        return pid, exc
 
 
 def main() -> None:
     input_dir  = Path("/work/imvia/in156281/datasets/hecktor_dataset")
     output_dir = Path("/work/imvia/in156281/datasets/hecktor_dataset_preprocessed")
+    n_workers  = max(1, multiprocessing.cpu_count() // 2)
 
     patient_dirs = sorted(d for d in input_dir.iterdir() if d.is_dir())
     print(f"{len(patient_dirs)} patients trouvés dans {input_dir}")
+    print(f"Parallélisation sur {n_workers} workers CPU")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    errors = []
-    for pdir in tqdm(patient_dirs, desc="Preprocessing"):
-        pid     = pdir.name
-        ct_path = pdir / f"{pid}__CT.nii.gz"
-        pt_path = pdir / f"{pid}__PT.nii.gz"
-        lbl_path = pdir / f"{pid}.nii.gz"
+    errors  = []
+    skipped = 0
+    args    = [(pdir, output_dir) for pdir in patient_dirs]
 
-        if not ct_path.exists() or not pt_path.exists():
-            print(f"  [{pid}] CT ou PT manquant, ignoré")
-            continue
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(process_patient, a): a[0].name for a in args}
+        for future in tqdm(
+            concurrent.futures.as_completed(futures),
+            total=len(futures),
+            desc="Preprocessing",
+        ):
+            pid, result = future.result()
+            if result == "missing":
+                skipped += 1
+                print(f"  [{pid}] CT ou PT manquant, ignoré")
+            elif result is not None:
+                errors.append((pid, result))
+                print(f"  [{pid}] ERREUR : {result}")
 
-        try:
-            out_pdir = output_dir / pid
-            out_pdir.mkdir(parents=True, exist_ok=True)
-
-            ct_sitk, pt_sitk, _       = resample_images(str(ct_path), str(pt_path))
-            ct_crop, pt_crop, _, _    = crop_neck_region_sitk(ct_sitk, pt_sitk)
-            ct_proc, pet_proc, _      = apply_monai_transforms(ct_crop, pt_crop)
-
-            ct_affine  = np.array(ct_proc.meta.get("affine",  np.eye(4)))
-            pet_affine = np.array(pet_proc.meta.get("affine", np.eye(4)))
-
-            nib.save(
-                nib.Nifti1Image(ct_proc.numpy().squeeze(0),  ct_affine),
-                str(out_pdir / f"{pid}__CT.nii.gz"),
-            )
-            nib.save(
-                nib.Nifti1Image(pet_proc.numpy().squeeze(0), pet_affine),
-                str(out_pdir / f"{pid}__PT.nii.gz"),
-            )
-
-            if lbl_path.exists():
-                shutil.copy(str(lbl_path), str(out_pdir / f"{pid}.nii.gz"))
-
-        except Exception as exc:
-            errors.append((pid, exc))
-            print(f"  [{pid}] ERREUR : {exc}")
-
-    print(f"\nTerminé — {len(patient_dirs) - len(errors)}/{len(patient_dirs)} traités")
+    processed = len(patient_dirs) - len(errors) - skipped
+    print(f"\nTerminé — {processed}/{len(patient_dirs)} traités")
     print(f"Résultats dans : {output_dir}")
     if errors:
         print(f"{len(errors)} erreur(s) :")
