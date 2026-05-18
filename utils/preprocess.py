@@ -54,6 +54,7 @@ def sitk_to_metatensor(img_sitk: sitk.Image) -> MetaTensor:
         "origin":    tuple(img_sitk.GetOrigin()),
         "direction": tuple(img_sitk.GetDirection()),
         "affine":    affine,
+        "space":     "RAS",
     }
     return MetaTensor(arr, meta=meta)
 
