@@ -318,8 +318,8 @@ def main() -> None:
                 print(f"  [{pid}] ERREUR : {result}")
 
     processed = len(patient_dirs) - len(errors) - skipped
-    print(f"\nTerminé — {processed}/{len(patient_dirs)} traités")
-    print(f"Résultats dans : {output_dir}")
+    print(f"{processed}/{len(patient_dirs)}")
+    print(f"{output_dir}")
     if errors:
         print(f"{len(errors)} erreur(s) :")
         for pid, exc in errors:
