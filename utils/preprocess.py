@@ -298,34 +298,68 @@ def process_patient(args):
 def main() -> None:
     input_dir  = Path("/work/imvia/in156281/datasets/hecktor_dataset")
     output_dir = Path("/work/imvia/in156281/datasets/hecktor_dataset_preprocessed")
-    n_workers  = max(1, multiprocessing.cpu_count() // 2)
+    # Démarre à cpu_count()//2 ; le retry réduit automatiquement de moitié en cas d'OOM
+    max_workers = max(1, multiprocessing.cpu_count() // 2)
+    n_workers   = max_workers
 
     patient_dirs = sorted(d for d in input_dir.iterdir() if d.is_dir())
     print(f"{len(patient_dirs)} patients trouvés dans {input_dir}")
-    print(f"Parallélisation sur {n_workers} workers CPU")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    errors  = []
-    skipped = 0
-    args    = [(pdir, output_dir) for pdir in patient_dirs]
+    errors   = []
+    skipped  = 0
+    done_pids: set = set()
+    all_args = [(pdir, output_dir) for pdir in patient_dirs]
+    remaining = list(all_args)
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
-        futures = {executor.submit(process_patient, a): a[0].name for a in args}
-        for future in tqdm(
-            concurrent.futures.as_completed(futures),
-            total=len(futures),
-            desc="Preprocessing",
-        ):
-            pid, result = future.result()
-            if result == "missing":
-                skipped += 1
-                print(f"  [{pid}] CT ou PT manquant, ignoré")
-            elif result is not None:
-                errors.append((pid, result))
-                print(f"  [{pid}] ERREUR : {result}")
+    pbar = tqdm(total=len(all_args), desc="Preprocessing")
 
-    processed = len(patient_dirs) - len(errors) - skipped
-    print(f"{processed}/{len(patient_dirs)}")
+    while remaining:
+        print(f"Démarrage avec {n_workers} workers ({len(remaining)} patients restants)")
+        batch = list(remaining)
+        remaining = []
+        batch_ok = True
+
+        try:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {executor.submit(process_patient, a): a[0].name for a in batch}
+                for future in concurrent.futures.as_completed(futures):
+                    pid_key = futures[future]
+                    try:
+                        pid, result = future.result()
+                    except concurrent.futures.process.BrokenProcessPool:
+                        raise
+                    except Exception as exc:
+                        done_pids.add(pid_key)
+                        pbar.update(1)
+                        errors.append((pid_key, exc))
+                        print(f"\n  [{pid_key}] ERREUR inattendue : {exc}")
+                        continue
+                    done_pids.add(pid)
+                    pbar.update(1)
+                    if result == "missing":
+                        skipped += 1
+                        print(f"\n  [{pid}] CT ou PT manquant, ignoré")
+                    elif result is not None:
+                        errors.append((pid, result))
+                        print(f"\n  [{pid}] ERREUR : {result}")
+
+        except concurrent.futures.process.BrokenProcessPool:
+            batch_ok = False
+            remaining = [a for a in batch if a[0].name not in done_pids]
+            n_workers = max(1, n_workers // 2)
+            print(f"\nPool cassé (OOM kernel). {len(done_pids)} patients traités. "
+                  f"Reprise avec {n_workers} worker(s) pour {len(remaining)} patients restants.")
+
+        # Batch terminé sans crash : on tente de remonter vers max_workers
+        if batch_ok and n_workers < max_workers:
+            n_workers = min(n_workers * 2, max_workers)
+            print(f"\nBatch réussi, remontée à {n_workers} workers.")
+
+    pbar.close()
+
+    processed = len(all_args) - len(errors) - skipped
+    print(f"{processed}/{len(all_args)}")
     print(f"{output_dir}")
     if errors:
         print(f"{len(errors)} erreur(s) :")
