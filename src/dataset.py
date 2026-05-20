@@ -127,7 +127,7 @@ class HECKTORMultitaskDataset(CacheDataset):
 
 
 # Construit la liste de dictionnaires d'un split (train ou val) avec toutes les cibles
-def _build_data_list(case_ids, images_dir, labels_dir, df, clinical_encoder) -> List[dict]:
+def _build_data_list(case_ids, data_root, df, clinical_encoder) -> List[dict]:
     # Liste des dicts à retourner, un par patient
     items = []
     # Indexation du DataFrame par PatientID pour un accès O(1)
@@ -135,6 +135,8 @@ def _build_data_list(case_ids, images_dir, labels_dir, df, clinical_encoder) -> 
     for cid in case_ids:
         if cid not in df_idx.index:
             continue
+        # Dossier du patient : {data_root}/{cid}/
+        patient_dir = os.path.join(data_root, cid)
         # Ligne CSV du patient courant
         row = df_idx.loc[cid]
         # Vecteur clinique encodé (7,)
@@ -148,12 +150,12 @@ def _build_data_list(case_ids, images_dir, labels_dir, df, clinical_encoder) -> 
         # Indicateur d'événement (1 = rechute, 0 = censuré)
         evt = int(row.get("Relapse", 0)) if not pd.isna(row.get("Relapse", np.nan)) else 0
         items.append({
-            # Chemin vers le fichier CT .npz
-            "ct":       os.path.join(images_dir, f"{cid}_ct.npz"),
-            # Chemin vers le fichier PET .npz
-            "pet":      os.path.join(images_dir, f"{cid}_pet.npz"),
-            # Chemin vers le masque de segmentation .npz
-            "label":    os.path.join(labels_dir, f"{cid}_label.npz"),
+            # Chemin vers le fichier CT : {cid}/{cid}__CT.nii.gz
+            "ct":       os.path.join(patient_dir, f"{cid}__CT.nii.gz"),
+            # Chemin vers le fichier PET : {cid}/{cid}__PT.nii.gz
+            "pet":      os.path.join(patient_dir, f"{cid}__PT.nii.gz"),
+            # Chemin vers le masque de segmentation : {cid}/{cid}.nii.gz
+            "label":    os.path.join(patient_dir, f"{cid}.nii.gz"),
             # Vecteur clinique encodé (7,) sous forme de tensor
             "clinical": torch.from_numpy(clin),
             # Classe de staging T comme tensor long
@@ -174,14 +176,11 @@ def _build_data_list(case_ids, images_dir, labels_dir, df, clinical_encoder) -> 
 def get_multitask_dataloaders(config) -> tuple:
     import random
 
-    # Chemin complet vers le dossier des images CT/PET preprocessées
-    images_dir = os.path.join(config.data_root, config.train_images_dir)
-    # Chemin complet vers le dossier des labels de segmentation
-    labels_dir = os.path.join(config.data_root, config.train_labels_dir)
-    # Liste triée des fichiers CT pour déduire les case_ids disponibles
-    ct_files = sorted(f for f in os.listdir(images_dir) if f.endswith("_ct.npz"))
-    # Identifiants de cas extraits des noms de fichiers CT
-    case_ids = [f.replace("_ct.npz", "") for f in ct_files]
+    # Découverte des patients : chaque sous-dossier de data_root est un patient
+    case_ids = sorted(
+        d for d in os.listdir(config.data_root)
+        if os.path.isdir(os.path.join(config.data_root, d))
+    )
 
     random.seed(config.seed)
     random.shuffle(case_ids)
@@ -200,9 +199,9 @@ def get_multitask_dataloaders(config) -> tuple:
     clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train_ids)])
 
     # Liste de dicts des patients d'entraînement
-    train_items = _build_data_list(train_ids, images_dir, labels_dir, df, clin_enc)
+    train_items = _build_data_list(train_ids, config.data_root, df, clin_enc)
     # Liste de dicts des patients de validation
-    val_items = _build_data_list(val_ids, images_dir, labels_dir, df, clin_enc)
+    val_items = _build_data_list(val_ids, config.data_root, df, clin_enc)
 
     # Sous-DataFrame d'entraînement utilisé pour calculer les quantiles de temps
     train_df = df[df["PatientID"].isin([it["case_id"] for it in train_items])].copy()
@@ -217,7 +216,7 @@ def get_multitask_dataloaders(config) -> tuple:
     # Dataset MONAI mis en cache pour la validation
     val_ds = HECKTORMultitaskDataset(
         data_list=val_items,
-        transform=get_validation_transforms(),
+        transform=get_validation_transforms(config),
         cache_rate=config.cache_rate,
         num_workers=config.num_workers,
     )

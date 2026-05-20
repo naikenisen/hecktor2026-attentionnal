@@ -1,9 +1,9 @@
-import numpy as np
-import torch
 from monai.transforms import (
     Compose,
-    MapTransform,
+    LoadImaged,
     EnsureChannelFirstd,
+    CenterSpatialCropd,
+    SpatialPadd,
     RandFlipd,
     RandScaleIntensityd,
     RandShiftIntensityd,
@@ -11,32 +11,9 @@ from monai.transforms import (
     RandGaussianSmoothd,
     EnsureTyped,
     RandCropByLabelClassesd,
-    RandCropByPosNegLabeld,
     ConcatItemsd,
     SelectItemsd,
 )
-
-# Transform MONAI qui charge un fichier .npz et en extrait l'image et les métadonnées
-class LoadNpzDictd(MapTransform):
-
-    # Charge chaque clé depuis son fichier .npz et injecte tensor + meta_dict dans le sample
-    def __call__(self, data):
-        # Copie du dictionnaire pour éviter de modifier l'original
-        d = dict(data)
-        for key in self.keys:
-            # Chemin du fichier .npz pour cette clé
-            filepath = d[key]
-            # Chargement avec allow_pickle=True requis pour les meta dicts NumPy
-            loaded = np.load(filepath, allow_pickle=True)
-            # Tableau numpy de l'image ou du masque
-            image_array = loaded['image']
-            # Dictionnaire de métadonnées spatiales (spacing, origin, affine...)
-            meta_dict = loaded['meta'].item()
-            # Conversion en tensor PyTorch
-            d[key] = torch.from_numpy(image_array)
-            # Métadonnées au format attendu par MONAI ({key}_meta_dict)
-            d[f"{key}_meta_dict"] = meta_dict
-        return d
 
 
 # Construit le pipeline de transforms d'entraînement multitâche avec augmentations
@@ -46,11 +23,12 @@ def get_multitask_train_transforms(config):
     # Clés à conserver après le SelectItemsd (inclut les cibles tabulaires)
     keep = ["image", "label", "clinical", "t_label", "n_label", "time", "event", "case_id"]
 
-    # Liste de transforms initialisée avec le chargeur .npz
-    transforms = [LoadNpzDictd(keys=keys)]
-
-    # Crop aléatoire centré sur les classes tumorales pour augmenter l'exposition aux lésions
-    transforms.append(
+    transforms = [
+        # Charge les fichiers .nii.gz via SimpleITK (retourne (H, W, D), ajoute meta_dict)
+        LoadImaged(keys=keys, image_only=False, ensure_channel_first=False),
+        # Ajoute la dimension canal : (H, W, D) → (1, H, W, D)
+        EnsureChannelFirstd(keys=keys, channel_dim="no_channel"),
+        # Crop aléatoire centré sur les classes tumorales
         RandCropByLabelClassesd(
             keys=keys,
             label_key="label",
@@ -60,8 +38,8 @@ def get_multitask_train_transforms(config):
             num_samples=1,
             allow_missing_keys=True,
             warn=False,
-        )
-    )
+        ),
+    ]
 
     if config.use_augmentation:
         transforms.extend([
@@ -92,15 +70,21 @@ def get_multitask_train_transforms(config):
     return Compose(transforms)
 
 
-# Construit le pipeline de transforms de validation multitâche sans augmentation ni crop aléatoire
-def get_multitask_validation_transforms():
+# Construit le pipeline de transforms de validation multitâche sans augmentation
+def get_multitask_validation_transforms(config):
     # Clés des modalités et du masque
     keys = ["ct", "pet", "label"]
     # Clés conservées après la sélection (identiques à l'entraînement)
     keep = ["image", "label", "clinical", "t_label", "n_label", "time", "event", "case_id"]
     return Compose([
-        # Charge les fichiers .npz
-        LoadNpzDictd(keys=keys),
+        # Charge les fichiers .nii.gz
+        LoadImaged(keys=keys, image_only=False, ensure_channel_first=False),
+        # Ajoute la dimension canal : (H, W, D) → (1, H, W, D)
+        EnsureChannelFirstd(keys=keys, channel_dim="no_channel"),
+        # Crop centré pour garantir la taille spatiale attendue par le réseau
+        CenterSpatialCropd(keys=keys, roi_size=config.spatial_size),
+        # Padding si le volume est plus petit que spatial_size
+        SpatialPadd(keys=keys, spatial_size=config.spatial_size),
         # Fusionne CT et PET en une image bimodale (2, D, H, W)
         ConcatItemsd(keys=["ct", "pet"], name="image", dim=0),
         # Conserve uniquement les clés nécessaires

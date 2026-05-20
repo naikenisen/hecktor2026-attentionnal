@@ -6,14 +6,10 @@ from typing import Tuple
 @dataclass
 class MultitaskConfig:
 
-    # Racine du dataset HECKTOR sur disque
-    data_root: str = "../../hecktor2026_training"
-    # Sous-dossier contenant les images CT/PET preprocessées en .npz
-    train_images_dir: str = "imagesTr_resampled_cropped_npy"
-    # Sous-dossier contenant les masques de segmentation preprocessés en .npz
-    train_labels_dir: str = "labelsTr_resampled_cropped_npy"
+    # Racine du dataset HECKTOR sur disque (un sous-dossier par patient)
+    data_root: str = "/work/imvia/in156281/datasets/hecktor_dataset_preprocessed"
     # Chemin vers le CSV des données cliniques et cibles
-    csv_path: str = "../../hecktor2026_training/HECKTOR_2026_Training.csv"
+    csv_path: str = "/work/imvia/in156281/datasets/hecktor_dataset/HECKTOR_2026_Training.csv"
 
     # Nombre de canaux d'entrée (CT + PET)
     input_channels: int = 2
