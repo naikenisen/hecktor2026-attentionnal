@@ -63,7 +63,7 @@ class SwinUNETRConfig:
     use_checkpoint: bool = True
 
     # Chemin vers les poids SSL pré-entraînés du SwinViT MONAI
-    pretrained_path: str = "/beegfs/data/work/imvia/in156281/hecktor2026-attentionnal/model_swinvit.pt"
+    pretrained_path: str = "/beegfs/data/work/imvia/in156281/hecktor2026-attentionnal/utils/model_swinvit.pt"
 
     # Crée les dossiers de sortie après initialisation du dataclass
     def __post_init__(self):
@@ -96,8 +96,6 @@ class SwinUNETRMultitask(nn.Module):
 
         if config.pretrained_path and os.path.exists(config.pretrained_path):
             weights = torch.load(config.pretrained_path, map_location="cpu", weights_only=False)
-            if "state_dict" in weights:
-                weights = weights["state_dict"]
             self.swinunetr.load_from(weights=weights)
             print(f"[SwinUNETRMultitask] SSL weights loaded from '{config.pretrained_path}'.")
         else:
