@@ -189,7 +189,7 @@ def main():
         # Périphérique GPU sélectionné
         device = torch.device(f"cuda:{args.cuda_device}")
         torch.cuda.set_device(device)
-        print(f"[Device] {device} — {torch.cuda.get_device_name(device)}")
+        print(f"[Device] {device} - {torch.cuda.get_device_name(device)}")
     else:
         # Repli sur CPU si CUDA indisponible
         device = torch.device("cpu")

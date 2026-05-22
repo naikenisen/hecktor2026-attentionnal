@@ -19,7 +19,7 @@ CLINICAL_CATEGORICAL = [
     "Alcohol Consumption",
     "Performance Status",
     "HPV Status",
-    "M-stage",
+    "Treatment",
 ]
 # Vérifie que le total des features cliniques vaut bien 7 comme attendu par le MLP
 assert len(CLINICAL_NUMERIC) + len(CLINICAL_CATEGORICAL) == 7
@@ -142,9 +142,9 @@ def _build_data_list(case_ids, data_root, df, clinical_encoder) -> List[dict]:
         # Vecteur clinique encodé (7,)
         clin = clinical_encoder.transform_row(row)
         # Label T encodé en entier (−1 si inconnu)
-        t_lbl = _encode_stage(row.get("T_stage"), T_STAGES)
+        t_lbl = _encode_stage(row.get("T-stage"), T_STAGES)
         # Label N encodé en entier (−1 si inconnu)
-        n_lbl = _encode_stage(row.get("N_stage"), N_STAGES)
+        n_lbl = _encode_stage(row.get("N-stage"), N_STAGES)
         # Temps de suivi RFS en valeur flottante (0.0 si absent)
         rfs = float(row.get("RFS", np.nan)) if not pd.isna(row.get("RFS", np.nan)) else 0.0
         # Indicateur d'événement (1 = rechute, 0 = censuré)
