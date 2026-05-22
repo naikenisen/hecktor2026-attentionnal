@@ -10,10 +10,10 @@ seg_loss = DiceFocalLoss(
     reduction="mean",
 )
 
-# Perte cross-entropie pour la classification du staging T
-t_loss = nn.CrossEntropyLoss()
-# Perte cross-entropie pour la classification du staging N
-n_loss = nn.CrossEntropyLoss()
+# Perte cross-entropie pour la classification du staging T (−1 = label inconnu, ignoré)
+t_loss = nn.CrossEntropyLoss(ignore_index=-1)
+# Perte cross-entropie pour la classification du staging N (−1 = label inconnu, ignoré)
+n_loss = nn.CrossEntropyLoss(ignore_index=-1)
 
 
 # Perte DeepHit discrète : NLL sur les bins de survie + terme de ranking sur la CIF
