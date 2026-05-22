@@ -63,7 +63,7 @@ class SwinUNETRConfig:
     use_checkpoint: bool = True
 
     # Chemin vers les poids SSL pré-entraînés du SwinViT MONAI
-    pretrained_path: str = "model_swinvit.pt"
+    pretrained_path: str = "/beegfs/data/work/imvia/in156281/hecktor2026-attentionnal/model_swinvit.pt"
 
     # Crée les dossiers de sortie après initialisation du dataclass
     def __post_init__(self):
