@@ -28,7 +28,10 @@ def discrete_risk_from_surv_logits(surv_logits: torch.Tensor) -> torch.Tensor:
 
 # Calcule le C-index de concordance (Harrell) entre scores de risque et temps de survie
 def c_index(risk_scores: np.ndarray, times: np.ndarray, events: np.ndarray) -> float:
-    if events.sum() == 0:
+    # Filtre les entrées non finies (NaN/Inf) pour ne pas faire planter lifelines
+    finite = np.isfinite(risk_scores) & np.isfinite(times) & np.isfinite(events)
+    risk_scores, times, events = risk_scores[finite], times[finite], events[finite]
+    if len(times) == 0 or events.sum() == 0:
         return 0.5
     # lifelines attend que scores élevés ↔ longue durée → on passe −risk
     return float(concordance_index(times, -risk_scores, events))

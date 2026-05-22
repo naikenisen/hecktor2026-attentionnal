@@ -100,22 +100,28 @@ class DeepHitDiscreteLoss(nn.Module):
 class UncertaintyWeightedLoss(nn.Module):
 
     # Initialise un log(σ) appris par tâche (σ=1 au démarrage)
-    def __init__(self, n_tasks: int = 4):
+    def __init__(self, n_tasks: int = 4, log_sigma_min: float = -3.0,
+                 log_sigma_max: float = 3.0):
         super().__init__()
         # Paramètres appris log(σᵢ) — un par tâche — ajoutés à l'optimiseur
         self.log_sigma = nn.Parameter(torch.zeros(n_tasks))
+        # Bornes de log(σ) : empêchent les poids 1/(2σ²) d'exploser (cause de NaN)
+        self.log_sigma_min = log_sigma_min
+        self.log_sigma_max = log_sigma_max
 
     # Combine les N pertes scalaires et retourne (perte_totale, poids_détachés)
     def forward(self, *task_losses: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         assert len(task_losses) == self.log_sigma.numel(), \
             f"Expected {self.log_sigma.numel()} losses, got {len(task_losses)}"
 
+        # log(σ) borné pour garder les poids dans une plage numériquement stable
+        log_sigma = self.log_sigma.clamp(self.log_sigma_min, self.log_sigma_max)
         # Variance de chaque tâche σᵢ²
-        sigma_sq = torch.exp(2 * self.log_sigma)
+        sigma_sq = torch.exp(2 * log_sigma)
         # Poids de chaque tâche : 1/(2σᵢ²)
         weights = 1.0 / (2.0 * sigma_sq)
 
         # Perte totale = Σ [ wᵢ · Lᵢ + log(σᵢ) ] selon la formule de Kendall
         total = sum(w * l + s for w, l, s in
-                    zip(weights, task_losses, self.log_sigma))
+                    zip(weights, task_losses, log_sigma))
         return total, weights.detach()

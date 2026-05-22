@@ -95,10 +95,20 @@ def train_one_epoch(model, loader, optimizer, weighting, deephit, bin_edges,
             # Phase normale : pondération automatique par incertitude
             loss, _ = weighting(l_seg, l_t, l_n, l_srv)
 
+        # Garde anti-NaN : on saute le batch sans stepper si la perte explose,
+        # pour ne pas corrompre les poids du modèle avec des gradients non finis
+        if not torch.isfinite(loss):
+            print("[WARN] perte non finie détectée — batch ignoré")
+            optimizer.zero_grad(set_to_none=True)
+            continue
+
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
-        # Gradient clipping pour stabiliser l'entraînement multitâche
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.grad_clip_norm)
+        # Gradient clipping sur tous les paramètres optimisés (modèle + pondération)
+        torch.nn.utils.clip_grad_norm_(
+            list(model.parameters()) + list(weighting.parameters()),
+            max_norm=config.grad_clip_norm,
+        )
         optimizer.step()
 
         total_loss += loss.item()
@@ -282,7 +292,7 @@ def main():
                 path = os.path.join(config.checkpoint_dir, "best_model.pth")
                 model.save_checkpoint(path, epoch, optimizer.state_dict(),
                                       best_metric=best_metric)
-                print(f"[Save] new best model ({combined:.4f}) → {path}")
+                print(f"[Save] new best model ({combined:.4f}) -> {path}")
 
         # Décroissance du LR après chaque epoch
         scheduler.step()
