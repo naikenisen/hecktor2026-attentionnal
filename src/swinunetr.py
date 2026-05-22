@@ -88,7 +88,6 @@ class SwinUNETRMultitask(nn.Module):
 
         # Instance SwinUNETR MONAI standard (sera appelé manuellement dans forward)
         self.swinunetr = SwinUNETR(
-            img_size=config.spatial_size,
             in_channels=config.input_channels,
             out_channels=config.num_classes,
             feature_size=config.feature_size,

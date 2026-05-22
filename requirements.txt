@@ -9,3 +9,4 @@ lifelines
 scikit-learn
 tensorboard
 tqdm
+einops
