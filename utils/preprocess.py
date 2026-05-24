@@ -303,7 +303,7 @@ def main() -> None:
     n_workers   = max_workers
 
     patient_dirs = sorted(d for d in input_dir.iterdir() if d.is_dir())
-    print(f"{len(patient_dirs)} patients trouvés dans {input_dir}")
+    print(f"{len(patient_dirs)} patients trouves dans {input_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     errors   = []
@@ -315,7 +315,7 @@ def main() -> None:
     pbar = tqdm(total=len(all_args), desc="Preprocessing")
 
     while remaining:
-        print(f"Démarrage avec {n_workers} workers ({len(remaining)} patients restants)")
+        print(f"Demarrage avec {n_workers} workers ({len(remaining)} patients restants)")
         batch = list(remaining)
         remaining = []
         batch_ok = True
@@ -339,7 +339,7 @@ def main() -> None:
                     pbar.update(1)
                     if result == "missing":
                         skipped += 1
-                        print(f"\n  [{pid}] CT ou PT manquant, ignoré")
+                        print(f"\n  [{pid}] CT ou PT manquant, ignore")
                     elif result is not None:
                         errors.append((pid, result))
                         print(f"\n  [{pid}] ERREUR : {result}")
@@ -348,13 +348,13 @@ def main() -> None:
             batch_ok = False
             remaining = [a for a in batch if a[0].name not in done_pids]
             n_workers = max(1, n_workers // 2)
-            print(f"\nPool cassé (OOM kernel). {len(done_pids)} patients traités. "
+            print(f"\nPool casse (OOM kernel). {len(done_pids)} patients traites. "
                   f"Reprise avec {n_workers} worker(s) pour {len(remaining)} patients restants.")
 
         # Batch terminé sans crash : on tente de remonter vers max_workers
         if batch_ok and n_workers < max_workers:
             n_workers = min(n_workers * 2, max_workers)
-            print(f"\nBatch réussi, remontée à {n_workers} workers.")
+            print(f"\nBatch reussi, remontee a {n_workers} workers.")
 
     pbar.close()
 

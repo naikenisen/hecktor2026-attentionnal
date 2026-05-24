@@ -98,7 +98,7 @@ def train_one_epoch(model, loader, optimizer, weighting, deephit, bin_edges,
         # Garde anti-NaN : on saute le batch sans stepper si la perte explose,
         # pour ne pas corrompre les poids du modèle avec des gradients non finis
         if not torch.isfinite(loss):
-            print("[WARN] perte non finie détectée — batch ignoré")
+            print("[WARN] perte non finie detectee - batch ignore")
             optimizer.zero_grad(set_to_none=True)
             continue
 
@@ -217,7 +217,7 @@ def main():
     model = MultitaskModel(config).to(device)
     # Nombre total de paramètres du modèle
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"[Model] {n_params:,} paramètres")
+    print(f"[Model] {n_params:,} parametres")
 
     # Module de pondération par incertitude (ses paramètres sont optimisés conjointement)
     weighting = UncertaintyWeighting(n_tasks=4).to(device)
