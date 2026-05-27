@@ -35,8 +35,9 @@ class MultitaskConfig:
     d_model: int = 256
     # Nombre de têtes de l'attention multi-têtes
     n_heads: int = 4
-    # Dimension du vecteur clinique brut en entrée du MLP
-    n_clinical_features: int = 7
+    # Dimension du vecteur clinique en entrée du MLP (auto-écrasée par le ClinicalEncoder
+    # one-hot au moment de construire les loaders ; la valeur ici n'est qu'un défaut)
+    n_clinical_features: int = 22
     # Dimension cachée des têtes T/N après le GAP
     hidden_tn: int = 256
 
@@ -59,6 +60,14 @@ class MultitaskConfig:
     grad_clip_norm: float = 1.0
     # Puissance du scheduler PolynomialLR
     poly_lr_power: float = 0.9
+
+    # --- Phase 2 : entraînement découplé des têtes cliniques sur features cachées ---
+    # Taille de batch (gros, car on n'opère que sur des bottlenecks pré-calculés)
+    clinical_batch_size: int = 64
+    # Nombre d'epochs pour la phase têtes cliniques
+    clinical_epochs: int = 200
+    # Learning rate pour les têtes (plus élevé : petits modules, pas de backbone)
+    clinical_lr: float = 1e-3
 
     # Active les augmentations aléatoires à l'entraînement
     use_augmentation: bool = True

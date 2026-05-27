@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Tuple
 from monai.networks.nets import SwinUNETR
 
-# Configuration du backbone SwinUNETR utilisée par SwinUNETRMultitask
+# Configuration du backbone SwinUNETR utilisée par SwinUNETRBackbone
 @dataclass
 class SwinUNETRConfig:
 
@@ -78,7 +78,7 @@ class SwinUNETRConfig:
 
 
 # Sous-classe MONAI SwinUNETR qui expose le bottleneck en plus du masque de segmentation
-class SwinUNETRMultitask(nn.Module):
+class SwinUNETRBackbone(nn.Module):
 
     # Instancie le SwinUNETR MONAI et charge les poids SSL si disponibles
     def __init__(self, config: SwinUNETRConfig):
@@ -97,9 +97,9 @@ class SwinUNETRMultitask(nn.Module):
         if config.pretrained_path and os.path.exists(config.pretrained_path):
             weights = torch.load(config.pretrained_path, map_location="cpu", weights_only=False)
             self.swinunetr.load_from(weights=weights)
-            print(f"[SwinUNETRMultitask] SSL weights loaded from '{config.pretrained_path}'.")
+            print(f"[SwinUNETRBackbone] SSL weights loaded from '{config.pretrained_path}'.")
         else:
-            print(f"[SwinUNETRMultitask] WARNING: SSL weights not found ({config.pretrained_path}). Random init.")
+            print(f"[SwinUNETRBackbone] WARNING: SSL weights not found ({config.pretrained_path}). Random init.")
 
     # Retourne (seg_logits, bottleneck) en reproduisant manuellement le forward MONAI
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

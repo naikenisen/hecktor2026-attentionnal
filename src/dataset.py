@@ -41,8 +41,10 @@ class ClinicalEncoder:
         self.age_mean: Optional[float] = None
         # Écart-type de l'âge pour la standardisation
         self.age_std: Optional[float] = None
-        # Dictionnaire de mapping valeur → entier pour chaque variable catégorielle
+        # Dictionnaire de mapping valeur → index one-hot pour chaque variable catégorielle
         self.cat_maps: Dict[str, Dict[str, int]] = {}
+        # Dimension totale du vecteur encodé (1 âge + Σ one-hot) ; fixée au fit
+        self.output_dim: Optional[int] = None
 
     # Calcule les statistiques d'encodage sur le DataFrame d'entraînement
     def fit(self, df: pd.DataFrame):
@@ -56,15 +58,18 @@ class ClinicalEncoder:
         self.age_std = float(ages.std()) if len(ages) and ages.std() > 1e-6 else 1.0
 
         for col in CLINICAL_CATEGORICAL:
-            # Valeurs uniques de la colonne avec ajout forcé de la classe inconnue
-            vals = df[col].astype(str).fillna("Inconnu").unique().tolist()
+            # Catégories observées (NaN exclu) + classe "Inconnu" pour les manquants
+            vals = df[col].dropna().astype(str).unique().tolist()
             if "Inconnu" not in vals:
                 vals.append("Inconnu")
-            # Mapping alphabétique valeur → index entier
+            # Mapping ordonné valeur → position dans le vecteur one-hot
             self.cat_maps[col] = {v: i for i, v in enumerate(sorted(vals))}
+
+        # Dimension finale : âge (1) + somme des cardinalités one-hot
+        self.output_dim = 1 + sum(len(m) for m in self.cat_maps.values())
         return self
 
-    # Transforme une ligne du DataFrame en vecteur numpy (7,) de features normalisées
+    # Transforme une ligne du DataFrame en vecteur numpy (output_dim,) normalisé/one-hot
     def transform_row(self, row: pd.Series) -> np.ndarray:
         # Valeur brute de l'âge (NaN remplacé par la médiane)
         age = row.get("Age", np.nan)
@@ -76,16 +81,17 @@ class ClinicalEncoder:
         # Initialise le vecteur de features avec l'âge normalisé
         feats = [age_z]
         for col in CLINICAL_CATEGORICAL:
-            # Valeur brute de la variable catégorielle (NaN → "Inconnu")
-            val = row.get(col, np.nan)
-            if pd.isna(val):
-                val = "Inconnu"
-            val = str(val)
             # Mapping de la colonne courante
             mapping = self.cat_maps[col]
-            # Index entier de la catégorie (inconnue si absente du mapping)
+            # Valeur brute de la variable catégorielle (NaN → "Inconnu")
+            val = row.get(col, np.nan)
+            val = "Inconnu" if pd.isna(val) else str(val)
+            # Index one-hot (catégorie inconnue au train → "Inconnu")
             idx = mapping.get(val, mapping["Inconnu"])
-            feats.append(float(idx))
+            # Bloc one-hot de la variable
+            onehot = [0.0] * len(mapping)
+            onehot[idx] = 1.0
+            feats.extend(onehot)
         return np.array(feats, dtype=np.float32)
 
 
@@ -172,8 +178,8 @@ def _build_data_list(case_ids, data_root, df, clinical_encoder) -> List[dict]:
     return items
 
 
-# Crée les DataLoaders train et val ainsi que le DataFrame d'entraînement pour les quantiles
-def get_multitask_dataloaders(config) -> tuple:
+# Découpe les patients en splits train/val de façon déterministe (même seed partout)
+def split_case_ids(config) -> tuple:
     import random
 
     # Découverte des patients : chaque sous-dossier de data_root est un patient
@@ -186,10 +192,14 @@ def get_multitask_dataloaders(config) -> tuple:
     random.shuffle(case_ids)
     # Nombre de cas réservés à la validation
     n_val = int(len(case_ids) * config.val_split)
-    # Identifiants du split de validation
-    val_ids = case_ids[:n_val]
-    # Identifiants du split d'entraînement
-    train_ids = case_ids[n_val:]
+    # (train_ids, val_ids)
+    return case_ids[n_val:], case_ids[:n_val]
+
+
+# Crée les DataLoaders train et val ainsi que le DataFrame d'entraînement pour les quantiles
+def get_multitask_dataloaders(config) -> tuple:
+    # Splits déterministes partagés avec l'extraction de features
+    train_ids, val_ids = split_case_ids(config)
     print(f"[Data] {len(train_ids)} train / {len(val_ids)} val")
 
     # DataFrame complet des données cliniques et cibles
@@ -197,6 +207,9 @@ def get_multitask_dataloaders(config) -> tuple:
 
     # Encodeur clinique fitté uniquement sur les données d'entraînement
     clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train_ids)])
+    # Propage la dimension one-hot réelle à la config (lue par le ClinicalMLP)
+    config.n_clinical_features = clin_enc.output_dim
+    print(f"[Data] dim features cliniques (one-hot) = {clin_enc.output_dim}")
 
     # Liste de dicts des patients d'entraînement
     train_items = _build_data_list(train_ids, config.data_root, df, clin_enc)
@@ -232,5 +245,43 @@ def get_multitask_dataloaders(config) -> tuple:
         val_ds, batch_size=config.batch_size, shuffle=False,
         num_workers=config.num_workers, pin_memory=True,
         persistent_workers=config.num_workers > 0,
+    )
+    return train_loader, val_loader, train_df, clin_enc
+
+
+# Crée des loaders déterministes (transforms de validation, sans shuffle) pour
+# l'extraction de features : le backbone est figé, on veut un bottleneck reproductible.
+def get_feature_extraction_loaders(config) -> tuple:
+    # Mêmes splits que l'entraînement multitâche
+    train_ids, val_ids = split_case_ids(config)
+    print(f"[Extract] {len(train_ids)} train / {len(val_ids)} val")
+
+    # DataFrame complet des cibles
+    df = pd.read_csv(config.csv_path)
+    # Encodeur clinique fitté uniquement sur le train (identique à l'entraînement)
+    clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train_ids)])
+    # Propage la dimension one-hot réelle à la config
+    config.n_clinical_features = clin_enc.output_dim
+    print(f"[Extract] dim features cliniques (one-hot) = {clin_enc.output_dim}")
+
+    # Listes de dicts par split
+    train_items = _build_data_list(train_ids, config.data_root, df, clin_enc)
+    val_items = _build_data_list(val_ids, config.data_root, df, clin_enc)
+    # Sous-DataFrame train pour les quantiles de bins temporels
+    train_df = df[df["PatientID"].isin([it["case_id"] for it in train_items])].copy()
+
+    # Transforms de validation (déterministes) pour les deux splits
+    tf = get_validation_transforms(config)
+    train_ds = HECKTORMultitaskDataset(train_items, tf, config.cache_rate, config.num_workers)
+    val_ds = HECKTORMultitaskDataset(val_items, tf, config.cache_rate, config.num_workers)
+
+    # Loaders sans shuffle ni drop_last : on veut tous les patients, dans l'ordre
+    train_loader = DataLoader(
+        train_ds, batch_size=config.batch_size, shuffle=False,
+        num_workers=config.num_workers, pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=config.batch_size, shuffle=False,
+        num_workers=config.num_workers, pin_memory=True,
     )
     return train_loader, val_loader, train_df, clin_enc

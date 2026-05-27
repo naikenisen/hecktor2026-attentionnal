@@ -15,97 +15,88 @@ This unified task reflects a realistic clinical workflow, integrating diagnosis,
 
 ---
 
-## 2026 Pipeline — End-to-End Multitask Learning
+## 2026 Pipeline — Decoupled Two-Phase Multitask Learning
+
+L'entraînement end-to-end conjoint (seg + T/N + survie en un seul forward) était
+contraint à `batch_size=2` par la VRAM du SwinUNETR sur volumes 128³. Ce batch
+minuscule rendait la survie (DeepHit, qui a besoin de paires d'événements) et la
+classification (forte sur-représentation de N2) incapables d'apprendre, pendant que
+la pondération par incertitude étouffait ces tâches difficiles. La solution :
+**découpler la segmentation des tâches tabulaires** en deux phases.
+
+### Phase 1 — Segmentation (`train_seg.py`)
 
 ```
   CT+PET (RAW)
         |
-        | preprocessing (src/preprocessing.py)
-        | resampling 2×2×2 mm³, crop 128³ centred on tumour
-        |
+        | preprocessing : resampling 2×2×2 mm³, crop 128³ centré sur la tumeur
+        | transforms (src/transforms.py) : flip, noise, intensity
+        ▼
 CT+PET (B, 2, 128, 128, 128)
-        |
-        | dataloading and transformation (src/dataloader.py, src/transforms.py)
-        | missing values: categorical variables → "Unknown" class
-        | continuous variables → normalisation + median imputation
-        │
         ▼
     SwinUNETR (src/swinunetr.py)
-    SSL pre-trained weights on 5050 CTs (model_swinvit.pt)
+    Poids SSL pré-entraînés sur 5050 CTs (model_swinvit.pt)
         │
-    L_Seg = Dice+Focal (utils/losses.py)
+    L_Seg = Dice+Focal (utils/losses.py)  ← SEULE perte de la phase 1
         │
-        ├──► seg_mask (B, 3, D, H, W)
+        ├──► seg_mask (B, 3, D, H, W)        → sélection du best model (Dice)
         │
-        └──► bottleneck (B, C, D', H', W')
-                  │
-        ┌─────────┼─────────┐
-        │                   │
-        ▼                   ▼
-T-Head (src/heads.py)    N-Head (src/heads.py)
-  GAP → hidden (B,256)    GAP → hidden (B,256)
-      → logits (B,4)          → logits (B,4)
-        │                   │
-   L_T = CrossEnt      L_N = CrossEnt  (utils/losses.py)
-        │                   │
-        └─────────┬─────────┘
-                  │
-                  │  t_feat (B,256) + n_feat (B,256)
-                  │  → nn.Linear(512, d_model)
-                  │  → token_tn (B, 1, d_model)
-                  │
-                  │          Clinical (B, 7)
-                  │               │
-                  │     MLP (7→64→d_model) (src/clinical_encoder.py)
-                  │     NaN → "Unknown" class for categoricals
-                  │     NaN → median imputation for continuous
-                  │               │
-                  │          token_clin (B, 1, d_model)
-                  │               │
-                  ▼               ▼
-      ┌─────────────────────────────────────────────────┐
-      │              Cross-Attention Fusion              │
-      │              (src/cross_attention.py)            │
-      │                                                  │
-      │  Q (B, 3, d_model) :                             │
-      │  cat([CLS, token_clin, token_tn], dim=1)         │
-      │                                                  │
-      │  K = V (B, N, d_model) :                         │
-      │  Linear(C, d_model)(bottleneck.flatten(2)        │
-      │  .permute(0,2,1))                                │
-      │                                                  │
-      │  attn(Q, K, V) → enriched CLS (B, d_model)       │
-      └─────────────────────────┬───────────────────────┘
-                                │
-                                ▼
-                Survival Head (Discrete-Time)
-                nn.Linear(d_model → 256 → T) (src/heads.py)
-                T intervals defined by quantiles
-                over event times from the train set
-                                │
-                    ┌───────────┴────────────┐
-                    │                        │
-                    ▼ (training)             ▼ (inference)
-             raw logits (B, T)          softmax(logits)
-             L_Surv = DeepHit               │
-             (utils/losses.py)         Risk Probabilities (B, T)
-             gradient clipping
-             max_norm = 1.0
+        └──► bottleneck (B, 768, 4, 4, 4)
+
+Après convergence, train_seg.py recharge best_model.pth, GÈLE le backbone, et
+extrait le bottleneck spatial de CHAQUE patient (+ cibles T/N/RFS/event/clinique)
+vers experiments/<exp>/features/{train,val}.pt  (~150 MB, déterministe).
+```
+
+### Phase 2 — Têtes cliniques sur features cachées (`train_clinical.py`)
+
+```
+features/{train,val}.pt   (bottlenecks figés + cibles tabulaires)
+        │
+        │  gros batch (64) désormais possible : plus de volumes 3D en mémoire
+        ▼
+ClinicalModel (src/clinical_model.py)
+        │
+        ├─ bottleneck ─┬─► T-Head (GAP→256→logits B,4) ─► L_T = CrossEnt pondérée
+        │              └─► N-Head (GAP→256→logits B,4) ─► L_N = CrossEnt pondérée
+        │                         │
+        │              t_feat + n_feat → Linear(512, d_model) → token_tn (B,1,d)
+        │                         │
+        │   Clinical (B, 22) ─ MLP one-hot (src/clinical_encoder.py) ─► token_clin (B,1,d)
+        │                         │
+        ▼                         ▼
+   ┌──────────────────────────────────────────────┐
+   │           Cross-Attention Fusion              │
+   │           (src/cross_attention.py)            │
+   │  Q = cat([CLS, token_clin, token_tn]) (B,3,d) │
+   │  K = V = Linear(768, d)(bottleneck) (B,64,d)  │
+   │  attn(Q,K,V) → enriched CLS (B, d_model)      │
+   └─────────────────────┬─────────────────────────┘
+                         ▼
+            Survival Head (Discrete-Time, src/heads.py)
+            Linear(d → 256 → T) ; T intervalles = quantiles
+            des temps d'événement du train
+                         │
+            L_Surv = DeepHit (utils/losses.py)
+            calculée UNIQUEMENT sur les patients RFS>0 (survie nettoyée)
 
 ═══════════════════════════════════════════════════════════════════════════════
 
-TOTAL LOSS FUNCTION (End-to-End):
-
-  L_Total = w₁·L_Seg + w₂·L_T + w₃·L_N + w₄·L_Surv
-
-  • Dynamic weights (wᵢ) adjusted by Uncertainty Weighting (Kendall et al.)
-  • Gradients from all losses backpropagate through the Bottleneck
-  • Backpropagation of L_Surv via cross-attention → Bottleneck
-  • Warm-up: T/N and Survival heads are frozen for N_warmup epochs
-    → only segmentation is trained
-    → then progressive unfreezing of all heads
+LOSS PHASE 2 :  L = w_T·L_T + w_N·L_N + w_Surv·L_Surv
+  • Poids dynamiques par Uncertainty Weighting (Kendall et al.) sur 3 tâches
+  • CrossEntropy T/N pondérées par l'inverse des fréquences de classe
+  • Variables cliniques catégorielles encodées en one-hot (dim 22)
+  • Le backbone reste figé : aucun gradient ne remonte vers le SwinUNETR
 
 ═══════════════════════════════════════════════════════════════════════════════
+```
+
+### Exécution
+
+```bash
+python train_seg.py        # phase 1 : seg + extraction auto des bottlenecks
+python train_clinical.py   # phase 2 : T/N + survie
+# (train.sh enchaîne les deux ; train_seg.py --extract-only ré-extrait sans réentraîner)
 ```
 
 ---
@@ -115,22 +106,20 @@ TOTAL LOSS FUNCTION (End-to-End):
 ```
 hecktor2026/
 │
-├── train.py                     # single entry point
+├── train_seg.py                 # Phase 1 : segmentation seule + extraction des bottlenecks
+├── train_clinical.py            # Phase 2 : têtes T/N + survie sur features cachées
 │
 ├── src/
-│   ├── dataset.py               # HECKTORDataset + missing value handling
+│   ├── dataset.py               # HECKTORDataset + one-hot clinique + missing values
 │   ├── transforms.py            # MONAI augmentations (flip, noise, intensity)
 │   ├── preprocessing.py         # resampling 2×2×2 mm³, crop 128³
 │   │
-│   ├── model.py                 # MultitaskModel — central file
-│   │                            # forward() connects all components
-│   │                            # guarantees end-to-end backprop
-│   │
-│   ├── swinunetr.py             # SwinUNETRMultitask (MONAI subclass)
-│   │                            # returns (seg_mask, bottleneck)
+│   ├── swinunetr.py             # SwinUNETRBackbone (MONAI subclass)
+│   │                            # returns (seg_mask, bottleneck) — backbone phase 1
+│   ├── clinical_model.py        # ClinicalModel : bottleneck → logits T/N + survie (phase 2)
 │   ├── heads.py                 # TNHead (returns feat + logits) + SurvivalHead
 │   ├── cross_attention.py       # CrossAttentionFusion
-│   └── clinical_encoder.py     # Clinical MLP (7 → 64 → d_model)
+│   └── clinical_encoder.py     # Clinical MLP (one-hot → 64 → d_model)
 │
 ├── utils/
 │   ├── losses.py                # DiceFocal + CrossEntropy + DeepHit
