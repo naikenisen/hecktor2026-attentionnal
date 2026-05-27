@@ -27,7 +27,7 @@ class MultitaskConfig:
     # Active le gradient checkpointing pour économiser la VRAM
     use_checkpoint: bool = True
     # Chemin vers les poids SSL pré-entraînés du SwinViT
-    pretrained_path: str = "/beegfs/data/work/imvia/in156281/hecktor2026-attentionnal/utils/model_swinvit.pt"
+    pretrained_path: str = "utils/model_swinvit.pt"
     # Nombre de canaux du bottleneck SwinUNETR (feature_size=48 → 768)
     bottleneck_channels: int = 768
 
