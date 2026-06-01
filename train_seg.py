@@ -103,7 +103,6 @@ def extract_features(model, config, device):
 
 def main():
     device = torch.device("cuda")
-    print(f"using device {device} - {torch.cuda.get_device_name(device)}")
 
     # Dossiers de sortie dérivés de la config
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
