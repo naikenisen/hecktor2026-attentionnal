@@ -136,15 +136,13 @@ def main():
         train_loss = train_one_epoch(model, train_loader, optimizer, device, config)
         print(f"Epoch {epoch+1}/{config.num_epochs} loss : {train_loss:.4f}")
 
-        should_val = (epoch + 1) % 5 == 0 or (epoch + 1) == config.num_epochs
-        if should_val:
-            dice = validate(model, val_loader, device, config)
-            print(f"validation dice {dice:.4f}")
-            if dice > best_dice:
-                best_dice = dice
-                torch.save({"epoch": epoch, "model_state_dict": model.state_dict(),
-                            "best_metric": best_dice}, best_path)
-                print(f"saved new best model (dice {dice:.4f}) to {best_path}")
+        dice = validate(model, val_loader, device, config)
+        print(f"validation dice {dice:.4f}")
+        if dice > best_dice:
+            best_dice = dice
+            torch.save({"epoch": epoch, "model_state_dict": model.state_dict(),
+                        "best_metric": best_dice}, best_path)
+            print(f"saved new best model (dice {dice:.4f}) to {best_path}")
 
         scheduler.step()
 
