@@ -1,6 +1,6 @@
 #!/bin/ksh 
 #$ -q gpu
-#$ -o train.out
+#$ -o train_clinical.out
 #$ -j y
 #$ -N train
 
@@ -25,7 +25,4 @@ source "$VENV_DIR/bin/activate"
 module load python
 export PYTHONPATH="$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH"
 
-# Phase 1 : segmentation (entraîne le backbone puis extrait les bottlenecks)
-python train_seg.py
-# Phase 2 : têtes cliniques T/N + survie sur les features cachées
 python train_clinical.py
