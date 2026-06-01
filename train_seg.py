@@ -90,20 +90,20 @@ def extract_features(model, config, device):
     out_dir = os.path.join(config.experiment_dir, "features")
     os.makedirs(out_dir, exist_ok=True)
 
-    print("[Extract] train split...")
+    print("extracting train split")
     torch.save(_extract_split(model, train_loader, device),
                os.path.join(out_dir, "train.pt"))
-    print("[Extract] val split...")
+    print("extracting val split")
     torch.save(_extract_split(model, val_loader, device),
                os.path.join(out_dir, "val.pt"))
     # train_df pour le calcul des bins temporels en phase 2 (train_clinical.py)
     train_df.to_csv(os.path.join(out_dir, "train_df.csv"), index=False)
-    print(f"[Done] features -> {out_dir}")
+    print(f"features saved to {out_dir}")
 
 
 def main():
     device = torch.device("cuda")
-    print(f"[Device] {device} - {torch.cuda.get_device_name(device)}")
+    print(f"using device {device} - {torch.cuda.get_device_name(device)}")
 
     # Dossiers de sortie dérivés de la config
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
@@ -121,7 +121,7 @@ def main():
         pretrained_path=config.pretrained_path,
     ).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"[Model] backbone segmentation : {n_params:,} parametres")
+    print(f"segmentation backbone has {n_params:,} parameters")
 
     # DataLoaders (les champs tabulaires sont présents mais ignorés ici)
     train_loader, val_loader, _train_df, _clin = get_multitask_dataloaders(config)
@@ -139,19 +139,19 @@ def main():
         should_val = (epoch + 1) % 5 == 0 or (epoch + 1) == config.num_epochs
         if should_val:
             dice = validate(model, val_loader, device, config)
-            print(f"Val   : Dice={dice:.4f}")
+            print(f"validation dice {dice:.4f}")
             if dice > best_dice:
                 best_dice = dice
                 torch.save({"epoch": epoch, "model_state_dict": model.state_dict(),
                             "best_metric": best_dice}, best_path)
-                print(f"[Save] new best model (Dice={dice:.4f}) -> {best_path}")
+                print(f"saved new best model (dice {dice:.4f}) to {best_path}")
 
         scheduler.step()
 
-    print("Segmentation training complete.")
+    print("segmentation training complete")
 
     # Extraction automatique des features depuis le meilleur modèle de segmentation
-    print("Pipeline] extraction des bottlenecks depuis best_model.pth...")
+    print("extracting bottlenecks from best_model.pth")
     ckpt = torch.load(best_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     extract_features(model, config, device)

@@ -80,7 +80,7 @@ def train_one_epoch(model, data, idx_perm, optimizer, weighting, deephit,
         loss, _ = weighting(l_t, l_n, l_srv)
 
         if not torch.isfinite(loss):
-            print("[WARN] perte non finie - batch ignore")
+            print("non-finite loss, skipping batch")
             optimizer.zero_grad(set_to_none=True)
             continue
 
@@ -137,7 +137,7 @@ def validate(model, data, bin_edges, device, config):
 
 def main():
     device = torch.device("cuda")
-    print(f"[Device] {device} - {torch.cuda.get_device_name(device)}")
+    print(f"using device {device} - {torch.cuda.get_device_name(device)}")
 
     # Dossiers de sortie dérivés de la config
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
@@ -150,11 +150,11 @@ def main():
     train = load_features(os.path.join(feat_dir, "train.pt"), device)
     val = load_features(os.path.join(feat_dir, "val.pt"), device)
     train_df = pd.read_csv(os.path.join(feat_dir, "train_df.csv"))
-    print(f"[Data] {train['bottleneck'].size(0)} train / {val['bottleneck'].size(0)} val features")
+    print(f"loaded {train['bottleneck'].size(0)} train and {val['bottleneck'].size(0)} val features")
 
     # Aligne la dim du ClinicalMLP sur les vecteurs cliniques cachés (one-hot)
     config.n_clinical_features = train["clinical"].size(1)
-    print(f"[Data] dim features cliniques = {config.n_clinical_features}")
+    print(f"clinical feature dimension is {config.n_clinical_features}")
 
     # Bins temporels (quantiles sur les événements du train)
     bin_edges = torch.tensor(
@@ -164,7 +164,7 @@ def main():
 
     model = ClinicalModel(config).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"[Model] tetes cliniques : {n_params:,} parametres")
+    print(f"clinical heads have {n_params:,} parameters")
 
     # 3 tâches désormais : T, N, survie
     weighting = UncertaintyWeightedLoss(n_tasks=3).to(device)
@@ -194,13 +194,12 @@ def main():
             model, train, perm, optimizer, weighting, deephit,
             ce_t, ce_n, bin_edges, device, config,
         )
-        print(f"\n=== Epoch {epoch+1}/{config.clinical_epochs} ===")
-        print(f"Train loss : {train_loss:.4f}")
+        print(f"epoch {epoch+1}/{config.clinical_epochs} loss {train_loss:.4f}")
 
         if (epoch + 1) % 5 == 0 or (epoch + 1) == config.clinical_epochs:
             metrics = validate(model, val, bin_edges, device, config)
-            print(f"Val   : BalAcc T={metrics['bal_t']:.4f}  "
-                  f"N={metrics['bal_n']:.4f}  C-index={metrics['c_index']:.4f}")
+            print(f"validation balacc T {metrics['bal_t']:.4f} "
+                  f"balacc N {metrics['bal_n']:.4f} c-index {metrics['c_index']:.4f}")
 
             # Métrique combinée : moyenne des 3 tâches cliniques
             combined = (metrics["bal_t"] + metrics["bal_n"] + metrics["c_index"]) / 3
@@ -212,11 +211,11 @@ def main():
                     "model_state_dict": model.state_dict(),
                     "best_metric": best_metric,
                 }, path)
-                print(f"[Save] new best clinical ({combined:.4f}) -> {path}")
+                print(f"saved new best clinical model (score {combined:.4f}) to {path}")
 
         scheduler.step()
 
-    print("\nClinical training complete.")
+    print("clinical training complete")
 
 
 if __name__ == "__main__":
