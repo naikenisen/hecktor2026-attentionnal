@@ -8,7 +8,7 @@ import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from config import MultitaskConfig
-from src.swinunetr import SwinUNETRConfig, SwinUNETRBackbone
+from src.swinunetr import SwinUNETRBackbone
 from src.dataset import get_multitask_dataloaders, get_feature_extraction_loaders
 from utils.losses import seg_loss
 from monai.metrics import DiceMetric
@@ -18,15 +18,13 @@ from monai.data import decollate_batch
 
 # Instancie le backbone SwinUNETR (seg + bottleneck) depuis la config globale
 def build_backbone(config, device):
-    sw_cfg = SwinUNETRConfig(
+    return SwinUNETRBackbone(
         input_channels=config.input_channels,
         num_classes=config.num_seg_classes,
-        spatial_size=config.spatial_size,
         feature_size=config.feature_size,
         use_checkpoint=config.use_checkpoint,
         pretrained_path=config.pretrained_path,
-    )
-    return SwinUNETRBackbone(sw_cfg).to(device)
+    ).to(device)
 
 
 # Entraîne la segmentation sur un epoch complet et retourne la perte moyenne

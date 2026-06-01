@@ -1,105 +1,31 @@
 import os
 import torch
 import torch.nn as nn
-from dataclasses import dataclass
-from typing import Tuple
 from monai.networks.nets import SwinUNETR
-
-# Configuration du backbone SwinUNETR utilisée par SwinUNETRBackbone
-@dataclass
-class SwinUNETRConfig:
-
-    # Chemin racine vers les données d'entraînement
-    data_root: str = "/path/to/hecktor2026_training"
-    # Sous-dossier des images CT/PET preprocessées
-    train_images_dir: str = "imagesTr_resampled_cropped_npy"
-    # Sous-dossier des labels de segmentation preprocessés
-    train_labels_dir: str = "labelsTr_resampled_cropped_npy"
-
-    # Nombre de canaux d'entrée (CT + PET)
-    input_channels: int = 2
-    # Nombre de classes de segmentation (bg, GTVp, GTVn)
-    num_classes: int = 3
-    # Taille spatiale du volume 3D en voxels
-    spatial_size: Tuple[int, int, int] = (128, 128, 128)
-
-    # Taille de batch
-    batch_size: int = 2
-    # Learning rate initial
-    learning_rate: float = 1e-4
-    # Coefficient de régularisation L2
-    weight_decay: float = 1e-5
-    # Nombre total d'epochs
-    num_epochs: int = 350
-    # Puissance du scheduler PolynomialLR
-    poly_lr_power: float = 0.9
-    # Learning rate minimum pour le scheduler
-    poly_lr_min_lr: float = 1e-6
-
-    # Active les augmentations d'entraînement
-    use_augmentation: bool = True
-    # Probabilité d'application de chaque augmentation
-    aug_probability: float = 0.5
-
-    # Périphérique cible
-    device: str = "cuda"
-    # Nombre de workers du DataLoader
-    num_workers: int = 4
-    # Fraction du dataset mise en cache RAM
-    cache_rate: float = 0.25
-    # Fréquence de sauvegarde en epochs
-    save_checkpoint_every: int = 1
-    # Active les logs TensorBoard
-    use_tensorboard: bool = True
-
-    # Nom de l'expérience pour l'arborescence de sortie
-    experiment_name: str = "swinunetr"
-    # Dossier racine de sortie
-    output_dir: str = "experiments"
-
-    # Taille des feature maps (doit correspondre aux poids SSL MONAI)
-    feature_size: int = 48
-    # Active le gradient checkpointing pour économiser la VRAM
-    use_checkpoint: bool = True
-
-    # Chemin vers les poids SSL pré-entraînés du SwinViT MONAI
-    pretrained_path: str = "/beegfs/data/work/imvia/in156281/hecktor2026-attentionnal/utils/model_swinvit.pt"
-
-    # Crée les dossiers de sortie après initialisation du dataclass
-    def __post_init__(self):
-        # Dossier principal de l'expérience
-        self.experiment_dir = os.path.join(self.output_dir, self.experiment_name)
-        # Dossier des checkpoints sauvegardés
-        self.checkpoint_dir = os.path.join(self.experiment_dir, "checkpoints")
-        # Dossier des logs TensorBoard
-        self.log_dir = os.path.join(self.experiment_dir, "logs")
-        for d in [self.experiment_dir, self.checkpoint_dir, self.log_dir]:
-            os.makedirs(d, exist_ok=True)
 
 
 # Sous-classe MONAI SwinUNETR qui expose le bottleneck en plus du masque de segmentation
 class SwinUNETRBackbone(nn.Module):
 
     # Instancie le SwinUNETR MONAI et charge les poids SSL si disponibles
-    def __init__(self, config: SwinUNETRConfig):
+    def __init__(self, input_channels: int, num_classes: int, feature_size: int,
+                 use_checkpoint: bool, pretrained_path: str | None = None):
         super().__init__()
-        # Référence à la configuration du backbone
-        self.config = config
 
         # Instance SwinUNETR MONAI standard (sera appelé manuellement dans forward)
         self.swinunetr = SwinUNETR(
-            in_channels=config.input_channels,
-            out_channels=config.num_classes,
-            feature_size=config.feature_size,
-            use_checkpoint=config.use_checkpoint,
+            in_channels=input_channels,
+            out_channels=num_classes,
+            feature_size=feature_size,
+            use_checkpoint=use_checkpoint,
         )
 
-        if config.pretrained_path and os.path.exists(config.pretrained_path):
-            weights = torch.load(config.pretrained_path, map_location="cpu", weights_only=False)
+        if pretrained_path and os.path.exists(pretrained_path):
+            weights = torch.load(pretrained_path, map_location="cpu", weights_only=False)
             self.swinunetr.load_from(weights=weights)
-            print(f"[SwinUNETRBackbone] SSL weights loaded from '{config.pretrained_path}'.")
+            print(f"[SwinUNETRBackbone] SSL weights loaded from '{pretrained_path}'.")
         else:
-            print(f"[SwinUNETRBackbone] WARNING: SSL weights not found ({config.pretrained_path}). Random init.")
+            print(f"[SwinUNETRBackbone] WARNING: SSL weights not found ({pretrained_path}). Random init.")
 
     # Retourne (seg_logits, bottleneck) en reproduisant manuellement le forward MONAI
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
