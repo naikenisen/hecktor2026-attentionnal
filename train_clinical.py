@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
-from torch.utils.tensorboard import SummaryWriter
 import config
 from src.clinical_model import ClinicalModel
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
@@ -143,8 +142,7 @@ def main():
     # Dossiers de sortie dérivés de la config
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
     config.checkpoint_dir = os.path.join(config.experiment_dir, "checkpoints")
-    config.log_dir = os.path.join(config.experiment_dir, "logs")
-    for d in (config.experiment_dir, config.checkpoint_dir, config.log_dir):
+    for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
 
     # Features pré-calculées
@@ -185,8 +183,6 @@ def main():
         optimizer, total_iters=config.clinical_epochs, power=config.poly_lr_power,
     )
 
-    writer = SummaryWriter(os.path.join(config.log_dir, "clinical")) \
-        if config.use_tensorboard else None
     ckpt_dir = config.checkpoint_dir
     best_metric = 0.0
     N_train = train["bottleneck"].size(0)
@@ -200,16 +196,11 @@ def main():
         )
         print(f"\n=== Epoch {epoch+1}/{config.clinical_epochs} ===")
         print(f"Train loss : {train_loss:.4f}")
-        if writer:
-            writer.add_scalar("ClinLoss/train", train_loss, epoch)
 
         if (epoch + 1) % 5 == 0 or (epoch + 1) == config.clinical_epochs:
             metrics = validate(model, val, bin_edges, device, config)
             print(f"Val   : BalAcc T={metrics['bal_t']:.4f}  "
                   f"N={metrics['bal_n']:.4f}  C-index={metrics['c_index']:.4f}")
-            if writer:
-                for k, v in metrics.items():
-                    writer.add_scalar(f"ClinVal/{k}", v, epoch)
 
             # Métrique combinée : moyenne des 3 tâches cliniques
             combined = (metrics["bal_t"] + metrics["bal_n"] + metrics["c_index"]) / 3
@@ -224,11 +215,7 @@ def main():
                 print(f"[Save] new best clinical ({combined:.4f}) -> {path}")
 
         scheduler.step()
-        if writer:
-            writer.add_scalar("ClinLR", optimizer.param_groups[0]["lr"], epoch)
 
-    if writer:
-        writer.close()
     print("\nClinical training complete.")
 
 

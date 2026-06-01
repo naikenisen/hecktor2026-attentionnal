@@ -75,9 +75,6 @@ seed = 42
 num_workers = 4
 # Fraction du dataset mise en cache en RAM par MONAI CacheDataset
 cache_rate = 0.25
-# Active l'écriture des métriques dans TensorBoard
-use_tensorboard = True
-
 # Nom de l'expérience (crée un sous-dossier dédié)
 experiment_name = "multitask_e2e"
 # Dossier racine de sortie pour les expériences

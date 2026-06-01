@@ -4,7 +4,6 @@ import os
 import torch
 import torch.optim as optim
 from tqdm import tqdm
-from torch.utils.tensorboard import SummaryWriter
 import config
 from src.swinunetr import SwinUNETRBackbone
 from src.dataset import get_multitask_dataloaders, get_feature_extraction_loaders
@@ -24,11 +23,9 @@ def train_one_epoch(model, loader, optimizer, device, config):
         ct_pet = batch["image"].to(device, non_blocking=True)
         # Masque de segmentation de référence
         seg_gt = batch["label"].to(device, non_blocking=True)
-
         # Forward : on ne garde que les logits de segmentation
         seg_logits, _ = model(ct_pet)
         loss = seg_loss(seg_logits, seg_gt)
-
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip_norm)
@@ -111,8 +108,7 @@ def main():
     # Dossiers de sortie dérivés de la config
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
     config.checkpoint_dir = os.path.join(config.experiment_dir, "checkpoints")
-    config.log_dir = os.path.join(config.experiment_dir, "logs")
-    for d in (config.experiment_dir, config.checkpoint_dir, config.log_dir):
+    for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
 
     # Chemin du meilleur modèle de segmentation
@@ -135,22 +131,15 @@ def main():
     scheduler = optim.lr_scheduler.PolynomialLR(
         optimizer, total_iters=config.num_epochs, power=config.poly_lr_power)
 
-    writer = SummaryWriter(config.log_dir) if config.use_tensorboard else None
-
     best_dice = 0.0
     for epoch in range(config.num_epochs):
-        print(f"\n=== Epoch {epoch+1}/{config.num_epochs} ===")
         train_loss = train_one_epoch(model, train_loader, optimizer, device, config)
-        print(f"Train loss : {train_loss:.4f}")
-        if writer:
-            writer.add_scalar("Loss/train", train_loss, epoch)
+        print(f"Epoch {epoch+1}/{config.num_epochs} loss : {train_loss:.4f}")
 
         should_val = (epoch + 1) % 5 == 0 or (epoch + 1) == config.num_epochs
         if should_val:
             dice = validate(model, val_loader, device, config)
             print(f"Val   : Dice={dice:.4f}")
-            if writer:
-                writer.add_scalar("Val/dice", dice, epoch)
             if dice > best_dice:
                 best_dice = dice
                 torch.save({"epoch": epoch, "model_state_dict": model.state_dict(),
@@ -158,11 +147,7 @@ def main():
                 print(f"[Save] new best model (Dice={dice:.4f}) -> {best_path}")
 
         scheduler.step()
-        if writer:
-            writer.add_scalar("LR", optimizer.param_groups[0]["lr"], epoch)
 
-    if writer:
-        writer.close()
     print("Segmentation training complete.")
 
     # Extraction automatique des features depuis le meilleur modèle de segmentation
