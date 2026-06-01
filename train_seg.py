@@ -16,17 +16,6 @@ from monai.transforms import AsDiscrete
 from monai.data import decollate_batch
 
 
-# Instancie le backbone SwinUNETR (seg + bottleneck) depuis la config globale
-def build_backbone(config, device):
-    return SwinUNETRBackbone(
-        input_channels=config.input_channels,
-        num_classes=config.num_seg_classes,
-        feature_size=config.feature_size,
-        use_checkpoint=config.use_checkpoint,
-        pretrained_path=config.pretrained_path,
-    ).to(device)
-
-
 # Entraîne la segmentation sur un epoch complet et retourne la perte moyenne
 def train_one_epoch(model, loader, optimizer, device, config):
     model.train()
@@ -153,7 +142,13 @@ def main():
 
     # Chemin du meilleur modèle de segmentation
     best_path = os.path.join(config.checkpoint_dir, "best_model.pth")
-    model = build_backbone(config, device)
+    model = SwinUNETRBackbone(
+        input_channels=config.input_channels,
+        num_classes=config.num_seg_classes,
+        feature_size=config.feature_size,
+        use_checkpoint=config.use_checkpoint,
+        pretrained_path=config.pretrained_path,
+    ).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[Model] backbone segmentation : {n_params:,} parametres")
 

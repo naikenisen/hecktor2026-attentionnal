@@ -20,12 +20,10 @@ class SwinUNETRBackbone(nn.Module):
             use_checkpoint=use_checkpoint,
         )
 
-        if pretrained_path and os.path.exists(pretrained_path):
-            weights = torch.load(pretrained_path, map_location="cpu", weights_only=False)
-            self.swinunetr.load_from(weights=weights)
-            print(f"[SwinUNETRBackbone] SSL weights loaded from '{pretrained_path}'.")
-        else:
-            print(f"[SwinUNETRBackbone] WARNING: SSL weights not found ({pretrained_path}). Random init.")
+
+        weights = torch.load(pretrained_path, map_location="cpu", weights_only=False)
+        self.swinunetr.load_from(weights=weights)
+        print(f"[SwinUNETRBackbone] SSL weights loaded from '{pretrained_path}'.")
 
     # Retourne (seg_logits, bottleneck) en reproduisant manuellement le forward MONAI
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
