@@ -59,14 +59,6 @@ def validate(model, loader, device, config):
     return dice
 
 
-# Sauvegarde le backbone et l'état de l'optimiseur
-def save_checkpoint(model, path, epoch, optimizer_state=None, **kwargs):
-    ckpt = {"epoch": epoch, "model_state_dict": model.state_dict(), **kwargs}
-    if optimizer_state is not None:
-        ckpt["optimizer_state_dict"] = optimizer_state
-    torch.save(ckpt, path)
-
-
 # Passe tout un split dans le backbone figé et collecte bottlenecks + cibles tabulaires
 @torch.no_grad()
 def _extract_split(model, loader, device):
@@ -161,17 +153,13 @@ def main():
                 writer.add_scalar("Val/dice", dice, epoch)
             if dice > best_dice:
                 best_dice = dice
-                save_checkpoint(model, best_path, epoch, optimizer.state_dict(),
-                                best_metric=best_dice)
+                torch.save({"epoch": epoch, "model_state_dict": model.state_dict(),
+                            "best_metric": best_dice}, best_path)
                 print(f"[Save] new best model (Dice={dice:.4f}) -> {best_path}")
 
         scheduler.step()
         if writer:
             writer.add_scalar("LR", optimizer.param_groups[0]["lr"], epoch)
-
-        if config.save_checkpoint_every > 0 and (epoch + 1) % config.save_checkpoint_every == 0:
-            save_checkpoint(model, os.path.join(config.checkpoint_dir, "last_model.pth"),
-                            epoch, optimizer.state_dict(), best_metric=best_dice)
 
     if writer:
         writer.close()

@@ -75,8 +75,6 @@ seed = 42
 num_workers = 4
 # Fraction du dataset mise en cache en RAM par MONAI CacheDataset
 cache_rate = 0.25
-# Fréquence de sauvegarde des checkpoints intermédiaires (en epochs)
-save_checkpoint_every = 5
 # Active l'écriture des métriques dans TensorBoard
 use_tensorboard = True
 
