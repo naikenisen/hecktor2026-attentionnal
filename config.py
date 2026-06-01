@@ -1,6 +1,3 @@
-# Centralise tous les hyperparamètres de la pipeline multitâche 2026.
-# Modifier ce fichier entre deux runs ; ne jamais muter ces variables depuis le code.
-
 # Racine du dataset HECKTOR sur disque (un sous-dossier par patient)
 data_root = "/work/imvia/in156281/datasets/hecktor_dataset_preprocessed"
 # Chemin vers le CSV des données cliniques et cibles
@@ -13,7 +10,7 @@ num_seg_classes = 3
 # Nombre de classes pour le staging T (T1..T4)
 num_t_classes = 4
 # Nombre de classes pour le staging N (N0..N3)
-num_n_classes = 4
+num_n_classes = 3
 # Taille spatiale du volume 3D en entrée du réseau
 spatial_size = (128, 128, 128)
 
