@@ -1,5 +1,3 @@
-import os
-
 # Centralise tous les hyperparamètres de la pipeline multitâche 2026.
 # Modifier ce fichier entre deux runs ; ne jamais muter ces variables depuis le code.
 
@@ -91,10 +89,3 @@ use_tensorboard = True
 experiment_name = "multitask_e2e"
 # Dossier racine de sortie pour les expériences
 output_dir = "experiments"
-
-# Dossiers dérivés (créés à l'import)
-experiment_dir = os.path.join(output_dir, experiment_name)
-checkpoint_dir = os.path.join(experiment_dir, "checkpoints")
-log_dir = os.path.join(experiment_dir, "logs")
-for _d in (experiment_dir, checkpoint_dir, log_dir):
-    os.makedirs(_d, exist_ok=True)

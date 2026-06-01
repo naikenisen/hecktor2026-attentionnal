@@ -155,6 +155,13 @@ def main():
         device = torch.device("cpu")
         print(f"[Device] {device}")
 
+    # Dossiers de sortie dérivés de la config
+    config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
+    config.checkpoint_dir = os.path.join(config.experiment_dir, "checkpoints")
+    config.log_dir = os.path.join(config.experiment_dir, "logs")
+    for d in (config.experiment_dir, config.checkpoint_dir, config.log_dir):
+        os.makedirs(d, exist_ok=True)
+
     # Features pré-calculées
     feat_dir = os.path.join(config.experiment_dir, "features")
     train = load_features(os.path.join(feat_dir, "train.pt"), device)
