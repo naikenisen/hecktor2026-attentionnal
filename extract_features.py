@@ -39,29 +39,20 @@ def extract_features(model, config, device):
     model.eval()
     # Loaders déterministes (transforms de validation, sans shuffle)
     train_loader, val_loader, train_df, _ = get_feature_extraction_loaders(config)
-    out_dir = os.path.join(config.experiment_dir, "features")
-    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(config.features_dir, exist_ok=True)
 
     print("extracting train split")
-    torch.save(_extract_split(model, train_loader, device),
-               os.path.join(out_dir, "train.pt"))
+    torch.save(_extract_split(model, train_loader, device), config.train_features_path)
     print("extracting val split")
-    torch.save(_extract_split(model, val_loader, device),
-               os.path.join(out_dir, "val.pt"))
+    torch.save(_extract_split(model, val_loader, device), config.val_features_path)
     # train_df pour le calcul des bins temporels en phase 2 (train_clinical.py)
-    train_df.to_csv(os.path.join(out_dir, "train_df.csv"), index=False)
-    print(f"features saved to {out_dir}")
+    train_df.to_csv(config.train_df_path, index=False)
+    print(f"features saved to {config.features_dir}")
 
 
 def main():
     device = torch.device("cuda")
 
-    # Dossiers de sortie dérivés de la config
-    config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
-    config.checkpoint_dir = os.path.join(config.experiment_dir, "checkpoints")
-
-    # Chemin du meilleur modèle de segmentation
-    best_path = os.path.join(config.checkpoint_dir, "best_model.pth")
     model = SwinUNETRBackbone(
         input_channels=config.input_channels,
         num_classes=config.num_seg_classes,
@@ -71,8 +62,8 @@ def main():
     ).to(device)
 
     # Extraction des bottlenecks depuis le meilleur modèle de segmentation
-    print("extracting bottlenecks from best_model.pth")
-    model.load_state_dict(torch.load(best_path, map_location=device))
+    print("extracting bottlenecks")
+    model.load_state_dict(torch.load(config.best_seg_path, map_location=device))
     extract_features(model, config, device)
 
 

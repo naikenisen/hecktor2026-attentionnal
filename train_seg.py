@@ -59,14 +59,10 @@ def validate(model, loader, device, config):
 def main():
     device = torch.device("cuda")
 
-    # Dossiers de sortie dérivés de la config
-    config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
-    config.checkpoint_dir = os.path.join(config.experiment_dir, "checkpoints")
+    # Crée les dossiers de sortie (chemins définis dans config.py)
     for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
 
-    # Chemin du meilleur modèle de segmentation
-    best_path = os.path.join(config.checkpoint_dir, "best_model.pth")
     model = SwinUNETRBackbone(
         input_channels=config.input_channels,
         num_classes=config.num_seg_classes,
@@ -90,7 +86,7 @@ def main():
         print(f"epoch : {epoch+1} loss : {train_loss:.4f} dice : {dice:.4f}")
         if dice > best_dice:
             best_dice = dice
-            torch.save(model.state_dict(), best_path)
+            torch.save(model.state_dict(), config.best_seg_path)
             print(f"saved best model")
         scheduler.step()
 

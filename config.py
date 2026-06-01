@@ -1,3 +1,5 @@
+import os
+
 # Racine du dataset HECKTOR sur disque (un sous-dossier par patient)
 data_root = "/work/imvia/in156281/datasets/hecktor_dataset_preprocessed"
 # Chemin vers le CSV des données cliniques et cibles
@@ -79,3 +81,22 @@ cache_rate = 0.25
 experiment_name = "multitask_e2e"
 # Dossier racine de sortie pour les expériences
 output_dir = "experiments"
+
+# --- Chemins dérivés (construits une seule fois ici, utilisés par tous les scripts) ---
+# Dossier de l'expérience courante
+experiment_dir = os.path.join(output_dir, experiment_name)
+# Dossier des checkpoints (modèles seg et clinique)
+checkpoint_dir = os.path.join(experiment_dir, "checkpoints")
+# Dossier des features (bottlenecks) pré-calculées
+features_dir = os.path.join(experiment_dir, "features")
+
+# Checkpoint du meilleur modèle de segmentation
+best_seg_path = os.path.join(checkpoint_dir, "best_model.pth")
+# Checkpoint du meilleur modèle clinique (phase 2)
+best_clinical_path = os.path.join(checkpoint_dir, "best_clinical.pth")
+
+# Fichiers de features pré-calculées
+train_features_path = os.path.join(features_dir, "train.pt")
+val_features_path = os.path.join(features_dir, "val.pt")
+# CSV du train pour le calcul des bins temporels en phase 2
+train_df_path = os.path.join(features_dir, "train_df.csv")

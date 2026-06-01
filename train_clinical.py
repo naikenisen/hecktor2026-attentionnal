@@ -139,17 +139,14 @@ def main():
     device = torch.device("cuda")
     print(f"using device {device} - {torch.cuda.get_device_name(device)}")
 
-    # Dossiers de sortie dérivés de la config
-    config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
-    config.checkpoint_dir = os.path.join(config.experiment_dir, "checkpoints")
+    # Crée les dossiers de sortie (chemins définis dans config.py)
     for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
 
     # Features pré-calculées
-    feat_dir = os.path.join(config.experiment_dir, "features")
-    train = load_features(os.path.join(feat_dir, "train.pt"), device)
-    val = load_features(os.path.join(feat_dir, "val.pt"), device)
-    train_df = pd.read_csv(os.path.join(feat_dir, "train_df.csv"))
+    train = load_features(config.train_features_path, device)
+    val = load_features(config.val_features_path, device)
+    train_df = pd.read_csv(config.train_df_path)
     print(f"loaded {train['bottleneck'].size(0)} train and {val['bottleneck'].size(0)} val features")
 
     # Aligne la dim du ClinicalMLP sur les vecteurs cliniques cachés (one-hot)
@@ -183,7 +180,6 @@ def main():
         optimizer, total_iters=config.clinical_epochs, power=config.poly_lr_power,
     )
 
-    ckpt_dir = config.checkpoint_dir
     best_metric = 0.0
     N_train = train["bottleneck"].size(0)
 
@@ -205,9 +201,8 @@ def main():
             combined = (metrics["bal_t"] + metrics["bal_n"] + metrics["c_index"]) / 3
             if combined > best_metric:
                 best_metric = combined
-                path = os.path.join(ckpt_dir, "best_clinical.pth")
-                torch.save(model.state_dict(), path)
-                print(f"saved new best clinical model (score {combined:.4f}) to {path}")
+                torch.save(model.state_dict(), config.best_clinical_path)
+                print(f"saved new best clinical model (score {combined:.4f}) to {config.best_clinical_path}")
 
         scheduler.step()
 
