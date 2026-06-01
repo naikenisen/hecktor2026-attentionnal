@@ -7,11 +7,6 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-
-# Ajoute la racine du projet au path pour les imports relatifs
-_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _root)
-
 from config import MultitaskConfig
 from src.swinunetr import SwinUNETRConfig, SwinUNETRBackbone
 from src.dataset import get_multitask_dataloaders, get_feature_extraction_loaders

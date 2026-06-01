@@ -10,11 +10,6 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-
-# Ajoute la racine du projet au path
-_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _root)
-
 from config import MultitaskConfig
 from src.clinical_model import ClinicalModel
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
