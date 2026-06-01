@@ -119,8 +119,6 @@ def main():
         use_checkpoint=config.use_checkpoint,
         pretrained_path=config.pretrained_path,
     ).to(device)
-    n_params = sum(p.numel() for p in model.parameters())
-    print(f"segmentation backbone has {n_params:,} parameters")
 
     # DataLoaders (les champs tabulaires sont présents mais ignorés ici)
     train_loader, val_loader, _train_df, _clin = get_multitask_dataloaders(config)
