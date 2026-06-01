@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
 import os
-import sys
-import argparse
 import numpy as np
 import pandas as pd
 import torch
@@ -138,22 +136,9 @@ def validate(model, data, bin_edges, device, config):
     }
 
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--cuda-device", type=int, default=0)
-    return p.parse_args()
-
-
 def main():
-    args = parse_args()
-
-    if config.device == "cuda" and torch.cuda.is_available():
-        device = torch.device(f"cuda:{args.cuda_device}")
-        torch.cuda.set_device(device)
-        print(f"[Device] {device} - {torch.cuda.get_device_name(device)}")
-    else:
-        device = torch.device("cpu")
-        print(f"[Device] {device}")
+    device = torch.device("cuda")
+    print(f"[Device] {device} - {torch.cuda.get_device_name(device)}")
 
     # Dossiers de sortie dérivés de la config
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)

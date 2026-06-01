@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
 import os
-import sys
-import argparse
 import torch
 import torch.optim as optim
 from tqdm import tqdm
@@ -30,11 +28,6 @@ def train_one_epoch(model, loader, optimizer, device, config):
         # Forward : on ne garde que les logits de segmentation
         seg_logits, _ = model(ct_pet)
         loss = seg_loss(seg_logits, seg_gt)
-
-        if not torch.isfinite(loss):
-            print("[WARN] perte non finie - batch ignore")
-            optimizer.zero_grad(set_to_none=True)
-            continue
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -119,25 +112,9 @@ def extract_features(model, config, device):
     print(f"[Done] features -> {out_dir}")
 
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--resume", type=str, default=None)
-    p.add_argument("--cuda-device", type=int, default=0)
-    # Saute l'entraînement et n'extrait que les features depuis best_model.pth
-    p.add_argument("--extract-only", action="store_true")
-    return p.parse_args()
-
-
 def main():
-    args = parse_args()
-
-    if config.device == "cuda" and torch.cuda.is_available():
-        device = torch.device(f"cuda:{args.cuda_device}")
-        torch.cuda.set_device(device)
-        print(f"[Device] {device} - {torch.cuda.get_device_name(device)}")
-    else:
-        device = torch.device("cpu")
-        print(f"[Device] {device}")
+    device = torch.device("cuda")
+    print(f"[Device] {device} - {torch.cuda.get_device_name(device)}")
 
     # Dossiers de sortie dérivés de la config
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
@@ -158,14 +135,6 @@ def main():
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[Model] backbone segmentation : {n_params:,} parametres")
 
-    # Mode extraction seule : recharge le best et dumpe les features
-    if args.extract_only:
-        ckpt = torch.load(best_path, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
-        print(f"[Load] {best_path}")
-        extract_features(model, config, device)
-        return
-
     # DataLoaders (les champs tabulaires sont présents mais ignorés ici)
     train_loader, val_loader, _train_df, _clin = get_multitask_dataloaders(config)
 
@@ -176,18 +145,8 @@ def main():
 
     writer = SummaryWriter(config.log_dir) if config.use_tensorboard else None
 
-    start_epoch = 0
     best_dice = 0.0
-    if args.resume:
-        ckpt = torch.load(args.resume, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
-        if "optimizer_state_dict" in ckpt:
-            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        start_epoch = ckpt.get("epoch", -1) + 1
-        best_dice = ckpt.get("best_metric", 0.0)
-        print(f"[Resume] epoch={start_epoch}  best_dice={best_dice:.4f}")
-
-    for epoch in range(start_epoch, config.num_epochs):
+    for epoch in range(config.num_epochs):
         print(f"\n=== Epoch {epoch+1}/{config.num_epochs} ===")
         train_loss = train_one_epoch(model, train_loader, optimizer, device, config)
         print(f"Train loss : {train_loss:.4f}")
@@ -216,10 +175,10 @@ def main():
 
     if writer:
         writer.close()
-    print("\nSegmentation training complete.")
+    print("Segmentation training complete.")
 
     # Extraction automatique des features depuis le meilleur modèle de segmentation
-    print("\n[Pipeline] extraction des bottlenecks depuis best_model.pth...")
+    print("Pipeline] extraction des bottlenecks depuis best_model.pth...")
     ckpt = torch.load(best_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     extract_features(model, config, device)

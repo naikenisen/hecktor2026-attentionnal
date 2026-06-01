@@ -71,8 +71,6 @@ val_split = 0.2
 # Graine aléatoire pour la reproductibilité
 seed = 42
 
-# Périphérique cible (cuda ou cpu)
-device = "cuda"
 # Nombre de workers pour le DataLoader
 num_workers = 4
 # Fraction du dataset mise en cache en RAM par MONAI CacheDataset
