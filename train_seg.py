@@ -7,7 +7,6 @@ from tqdm import tqdm
 import config
 from src.swinunetr import SwinUNETRBackbone
 from src.dataset import get_multitask_dataloaders
-from src.extract_features import extract_features
 from utils.losses import seg_loss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
@@ -94,11 +93,6 @@ def main():
             torch.save(model.state_dict(), best_path)
             print(f"saved best model")
         scheduler.step()
-
-    # Extraction automatique des features depuis le meilleur modèle de segmentation
-    print("extracting bottlenecks from best_model.pth")
-    model.load_state_dict(torch.load(best_path, map_location=device))
-    extract_features(model, config, device)
 
 
 if __name__ == "__main__":
