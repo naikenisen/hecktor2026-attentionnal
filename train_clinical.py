@@ -206,11 +206,7 @@ def main():
             if combined > best_metric:
                 best_metric = combined
                 path = os.path.join(ckpt_dir, "best_clinical.pth")
-                torch.save({
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "best_metric": best_metric,
-                }, path)
+                torch.save(model.state_dict(), path)
                 print(f"saved new best clinical model (score {combined:.4f}) to {path}")
 
         scheduler.step()

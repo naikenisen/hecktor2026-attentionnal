@@ -134,24 +134,17 @@ def main():
     best_dice = 0.0
     for epoch in range(config.num_epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, config)
-        print(f"Epoch {epoch+1}/{config.num_epochs} loss : {train_loss:.4f}")
-
         dice = validate(model, val_loader, device, config)
-        print(f"validation dice {dice:.4f}")
+        print(f"epoch : {epoch+1} loss : {train_loss:.4f} dice : {dice:.4f}")
         if dice > best_dice:
             best_dice = dice
-            torch.save({"epoch": epoch, "model_state_dict": model.state_dict(),
-                        "best_metric": best_dice}, best_path)
-            print(f"saved new best model (dice {dice:.4f}) to {best_path}")
-
+            torch.save(model.state_dict(), best_path)
+            print(f"saved best model")
         scheduler.step()
-
-    print("segmentation training complete")
 
     # Extraction automatique des features depuis le meilleur modèle de segmentation
     print("extracting bottlenecks from best_model.pth")
-    ckpt = torch.load(best_path, map_location=device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    model.load_state_dict(torch.load(best_path, map_location=device))
     extract_features(model, config, device)
 
 
