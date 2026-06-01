@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from config import MultitaskConfig
+import config
 from src.clinical_model import ClinicalModel
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
 from utils.metrics import balanced_accuracy, discrete_risk_from_surv_logits, c_index
@@ -146,7 +146,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    config = MultitaskConfig()
 
     if config.device == "cuda" and torch.cuda.is_available():
         device = torch.device(f"cuda:{args.cuda_device}")

@@ -7,7 +7,7 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from config import MultitaskConfig
+import config
 from src.swinunetr import SwinUNETRBackbone
 from src.dataset import get_multitask_dataloaders, get_feature_extraction_loaders
 from utils.losses import seg_loss
@@ -130,7 +130,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    config = MultitaskConfig()
 
     if config.device == "cuda" and torch.cuda.is_available():
         device = torch.device(f"cuda:{args.cuda_device}")
