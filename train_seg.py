@@ -15,11 +15,8 @@ def train_one_epoch(model, loader, optimizer, device, config):
     total_loss = 0.0
     n_batches = 0
     for batch in tqdm(loader, desc="Train", leave=False):
-
         ct_pet = batch["image"].to(device, non_blocking=True)
-
         seg_gt = batch["label"].to(device, non_blocking=True)
-
         seg_logits, _ = model(ct_pet)
         loss = seg_loss(seg_logits, seg_gt)
         optimizer.zero_grad(set_to_none=True)
@@ -36,7 +33,6 @@ def validate(model, loader, device, config):
     dice_metric = DiceMetric(include_background=False, reduction="mean")
     post_label = AsDiscrete(to_onehot=config.num_seg_classes)
     post_pred = AsDiscrete(argmax=True, to_onehot=config.num_seg_classes)
-
     for batch in tqdm(loader, desc="Val", leave=False):
         ct_pet = batch["image"].to(device)
         seg_gt = batch["label"].to(device)
@@ -44,17 +40,14 @@ def validate(model, loader, device, config):
         gt = [post_label(x) for x in decollate_batch(seg_gt)]
         pr = [post_pred(x) for x in decollate_batch(seg_logits)]
         dice_metric(y_pred=pr, y=gt)
-
     dice = dice_metric.aggregate().item()
     dice_metric.reset()
     return dice
 
 def main():
     device = torch.device("cuda")
-
     for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
-
     model = SwinUNETRBackbone(
         input_channels=config.input_channels,
         num_classes=config.num_seg_classes,
@@ -62,14 +55,11 @@ def main():
         use_checkpoint=config.use_checkpoint,
         pretrained_path=config.pretrained_path,
     ).to(device)
-
     train_loader, val_loader = get_seg_dataloaders(config)
-
     optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate,
                             weight_decay=config.weight_decay)
     scheduler = optim.lr_scheduler.PolynomialLR(
         optimizer, total_iters=config.num_epochs, power=config.poly_lr_power)
-
     best_dice = 0.0
     for epoch in range(config.num_epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, config)
@@ -80,6 +70,5 @@ def main():
             torch.save(model.state_dict(), config.best_seg_path)
             print(f"saved best model")
         scheduler.step()
-
 if __name__ == "__main__":
     main()
