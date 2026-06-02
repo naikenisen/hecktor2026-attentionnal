@@ -1,7 +1,7 @@
 import os
+import random
 import torch
 import pandas as pd
-from typing import List
 from tqdm import tqdm
 from monai.data import CacheDataset, DataLoader
 from monai.transforms import (
@@ -22,141 +22,152 @@ from monai.transforms import (
 )
 from src.networks import SwinUNETRBackbone
 
-def get_train_transforms(config):
-    keys = ["ct", "pet", "label"]
-    keep = ["image", "label", "case_id"]
-    transforms = [
-        LoadImaged(keys=keys, image_only=False, ensure_channel_first=False),
-        EnsureChannelFirstd(keys=keys, channel_dim="no_channel"),
-        RandCropByLabelClassesd(
-            keys=keys,
-            label_key="label",
-            spatial_size=config.spatial_size,
-            ratios=[0.1, 0.45, 0.45],
-            num_classes=3,
-            num_samples=1,
-            allow_missing_keys=True,
-            warn=False,
-        ),
-    ]
-    if config.use_augmentation:
-        transforms.extend([
-            RandFlipd(keys=keys, spatial_axis=[0, 1, 2], prob=config.aug_probability),
-            RandScaleIntensityd(keys=["ct"], factors=0.1, prob=config.aug_probability),
-            RandShiftIntensityd(keys=["ct"], offsets=0.1, prob=config.aug_probability),
-            RandGaussianNoised(keys=["ct"], std=0.01, prob=config.aug_probability),
-            RandGaussianSmoothd(
-                keys=["ct"],
-                sigma_x=(0.5, 1.15), sigma_y=(0.5, 1.15), sigma_z=(0.5, 1.15),
-                prob=config.aug_probability,
+VOLUME_KEYS = ["ct", "pet", "label"]
+MODALITY_KEYS = ["ct", "pet"]
+SAMPLE_KEYS = ["image", "label", "case_id"]
+
+class PetCtTransforms:
+
+    @staticmethod
+    def train(config) -> Compose:
+        steps = [
+            LoadImaged(keys=VOLUME_KEYS, image_only=False, ensure_channel_first=False),
+            EnsureChannelFirstd(keys=VOLUME_KEYS, channel_dim="no_channel"),
+            RandCropByLabelClassesd(
+                keys=VOLUME_KEYS,
+                label_key="label",
+                spatial_size=config.spatial_size,
+                ratios=[0.1, 0.45, 0.45],
+                num_classes=3,
+                num_samples=1,
+                allow_missing_keys=True,
+                warn=False,
             ),
+        ]
+        if config.use_augmentation:
+            steps.extend([
+                RandFlipd(keys=VOLUME_KEYS, spatial_axis=[0, 1, 2], prob=config.aug_probability),
+                RandScaleIntensityd(keys=["ct"], factors=0.1, prob=config.aug_probability),
+                RandShiftIntensityd(keys=["ct"], offsets=0.1, prob=config.aug_probability),
+                RandGaussianNoised(keys=["ct"], std=0.01, prob=config.aug_probability),
+                RandGaussianSmoothd(
+                    keys=["ct"],
+                    sigma_x=(0.5, 1.15), sigma_y=(0.5, 1.15), sigma_z=(0.5, 1.15),
+                    prob=config.aug_probability,
+                ),
+            ])
+        steps.extend([
+            ConcatItemsd(keys=MODALITY_KEYS, name="image", dim=0),
+            SelectItemsd(keys=SAMPLE_KEYS),
+            EnsureTyped(keys=["image", "label"]),
         ])
-    transforms.extend([
-        ConcatItemsd(keys=["ct", "pet"], name="image", dim=0),
-        SelectItemsd(keys=keep),
-        EnsureTyped(keys=["image", "label"]),
-    ])
-    return Compose(transforms)
+        return Compose(steps)
 
-def get_validation_transforms(config):
-    keys = ["ct", "pet", "label"]
-    keep = ["image", "label", "case_id"]
-    return Compose([
-        LoadImaged(keys=keys, image_only=False, ensure_channel_first=False),
-        EnsureChannelFirstd(keys=keys, channel_dim="no_channel"),
-        CenterSpatialCropd(keys=keys, roi_size=config.spatial_size),
-        SpatialPadd(keys=keys, spatial_size=config.spatial_size),
-        ConcatItemsd(keys=["ct", "pet"], name="image", dim=0),
-        SelectItemsd(keys=keep),
-        EnsureTyped(keys=["image", "label"]),
-    ])
+    @staticmethod
+    def validation(config) -> Compose:
+        return Compose([
+            LoadImaged(keys=VOLUME_KEYS, image_only=False, ensure_channel_first=False),
+            EnsureChannelFirstd(keys=VOLUME_KEYS, channel_dim="no_channel"),
+            CenterSpatialCropd(keys=VOLUME_KEYS, roi_size=config.spatial_size),
+            SpatialPadd(keys=VOLUME_KEYS, spatial_size=config.spatial_size),
+            ConcatItemsd(keys=MODALITY_KEYS, name="image", dim=0),
+            SelectItemsd(keys=SAMPLE_KEYS),
+            EnsureTyped(keys=["image", "label"]),
+        ])
 
-def _build_data_list(case_ids, data_root, df) -> List[dict]:
-    known = set(df["PatientID"])
-    items = []
-    for cid in case_ids:
-        if cid not in known:
-            continue
-        patient_dir = os.path.join(data_root, cid)
-        items.append({
-            "ct":      os.path.join(patient_dir, f"{cid}__CT.nii.gz"),
-            "pet":     os.path.join(patient_dir, f"{cid}__PT.nii.gz"),
-            "label":   os.path.join(patient_dir, f"{cid}.nii.gz"),
-            "case_id": cid,
-        })
-    return items
+class PetCtDataModule:
 
-def split_case_ids(config) -> tuple:
-    import random
+    def __init__(self, config):
+        self.config = config
+        self.known_patients = set(pd.read_csv(config.csv_path)["PatientID"])
+        self.train_ids, self.val_ids = self._split_case_ids()
 
-    case_ids = sorted(
-        d for d in os.listdir(config.data_root)
-        if os.path.isdir(os.path.join(config.data_root, d))
-    )
-    random.seed(config.seed)
-    random.shuffle(case_ids)
-    n_val = int(len(case_ids) * config.val_split)
-    return case_ids[n_val:], case_ids[:n_val]
+    def _split_case_ids(self) -> tuple:
+        case_ids = sorted(
+            d for d in os.listdir(self.config.data_root)
+            if os.path.isdir(os.path.join(self.config.data_root, d))
+        )
+        random.seed(self.config.seed)
+        random.shuffle(case_ids)
+        n_val = int(len(case_ids) * self.config.val_split)
+        train_ids, val_ids = case_ids[n_val:], case_ids[:n_val]
+        print(f"{len(train_ids)} train / {len(val_ids)} val")
+        return train_ids, val_ids
 
-def _prepare_items(config, tag: str) -> tuple:
-    train_ids, val_ids = split_case_ids(config)
-    print(f"[{tag}] {len(train_ids)} train / {len(val_ids)} val")
-    df = pd.read_csv(config.csv_path)
-    return (_build_data_list(train_ids, config.data_root, df),
-            _build_data_list(val_ids, config.data_root, df))
+    def _records(self, case_ids: list) -> list:
+        records = []
+        for case_id in case_ids:
+            if case_id not in self.known_patients:
+                continue
+            patient_dir = os.path.join(self.config.data_root, case_id)
+            records.append({
+                "ct":      os.path.join(patient_dir, f"{case_id}__CT.nii.gz"),
+                "pet":     os.path.join(patient_dir, f"{case_id}__PT.nii.gz"),
+                "label":   os.path.join(patient_dir, f"{case_id}.nii.gz"),
+                "case_id": case_id,
+            })
+        return records
 
-def _make_loader(items, transform, config, *, shuffle: bool, drop_last: bool) -> DataLoader:
-    ds = CacheDataset(data=items, transform=transform,
-                      cache_rate=config.cache_rate, num_workers=config.num_workers)
-    return DataLoader(
-        ds, batch_size=config.batch_size, shuffle=shuffle, drop_last=drop_last,
-        num_workers=config.num_workers, pin_memory=True,
-        persistent_workers=config.num_workers > 0,
-    )
+    def _loader(self, case_ids: list, transforms: Compose, *, shuffle: bool, drop_last: bool) -> DataLoader:
+        dataset = CacheDataset(
+            data=self._records(case_ids), transform=transforms,
+            cache_rate=self.config.cache_rate, num_workers=self.config.num_workers,
+        )
+        return DataLoader(
+            dataset, batch_size=self.config.batch_size, shuffle=shuffle, drop_last=drop_last,
+            num_workers=self.config.num_workers, pin_memory=True,
+            persistent_workers=self.config.num_workers > 0,
+        )
 
-def get_seg_dataloaders(config) -> tuple:
-    train_items, val_items = _prepare_items(config, "Data")
-    train_loader = _make_loader(train_items, get_train_transforms(config), config,
-                                shuffle=True, drop_last=True)
-    val_loader = _make_loader(val_items, get_validation_transforms(config), config,
-                              shuffle=False, drop_last=False)
-    return train_loader, val_loader
+    def segmentation_loaders(self) -> tuple:
+        train_loader = self._loader(self.train_ids, PetCtTransforms.train(self.config),
+                                    shuffle=True, drop_last=True)
+        val_loader = self._loader(self.val_ids, PetCtTransforms.validation(self.config),
+                                  shuffle=False, drop_last=False)
+        return train_loader, val_loader
 
-def get_feature_extraction_loaders(config) -> tuple:
-    train_items, val_items = _prepare_items(config, "Extract")
-    tf = get_validation_transforms(config)
-    train_loader = _make_loader(train_items, tf, config, shuffle=False, drop_last=False)
-    val_loader = _make_loader(val_items, tf, config, shuffle=False, drop_last=False)
-    return train_loader, val_loader
+    def extraction_loaders(self) -> tuple:
+        transforms = PetCtTransforms.validation(self.config)
+        train_loader = self._loader(self.train_ids, transforms, shuffle=False, drop_last=False)
+        val_loader = self._loader(self.val_ids, transforms, shuffle=False, drop_last=False)
+        return train_loader, val_loader
 
-@torch.no_grad()
-def _extract_split(model, loader, device):
-    feats, ids = [], []
-    for batch in tqdm(loader, desc="Extract", leave=False):
-        ct_pet = batch["image"].to(device, non_blocking=True)
-        _, bottleneck = model(ct_pet)
-        feats.append(bottleneck.float().cpu())
-        ids.extend(batch["case_id"])
-    return {
-        "bottleneck": torch.cat(feats),
-        "case_id":    ids,
-    }
+class BottleneckExtractor:
 
-@torch.no_grad()
-def extract_bottlenecks(config, device):
-    model = SwinUNETRBackbone(
-        input_channels=config.input_channels,
-        num_classes=config.num_seg_classes,
-        feature_size=config.feature_size,
-        use_checkpoint=config.use_checkpoint,
-        pretrained_path=config.pretrained_path,
-    ).to(device)
-    model.load_state_dict(torch.load(config.best_seg_path, map_location=device))
-    model.eval()
-    train_loader, val_loader = get_feature_extraction_loaders(config)
-    os.makedirs(config.features_dir, exist_ok=True)
-    print("extracting train split")
-    torch.save(_extract_split(model, train_loader, device), config.train_features_path)
-    print("extracting val split")
-    torch.save(_extract_split(model, val_loader, device), config.val_features_path)
-    print(f"features saved to {config.features_dir}")
+    def __init__(self, config, device):
+        self.config = config
+        self.device = device
+        self.data = PetCtDataModule(config)
+
+    def _load_frozen_backbone(self) -> SwinUNETRBackbone:
+        backbone = SwinUNETRBackbone(
+            input_channels=self.config.input_channels,
+            num_classes=self.config.num_seg_classes,
+            feature_size=self.config.feature_size,
+            use_checkpoint=self.config.use_checkpoint,
+            pretrained_path=self.config.pretrained_path,
+        ).to(self.device)
+        backbone.load_state_dict(torch.load(self.config.best_seg_path, map_location=self.device))
+        backbone.eval()
+        return backbone
+
+    @torch.no_grad()
+    def _bottlenecks_of(self, backbone: SwinUNETRBackbone, loader: DataLoader) -> dict:
+        bottlenecks, case_ids = [], []
+        for batch in tqdm(loader, desc="Extract", leave=False):
+            images = batch["image"].to(self.device, non_blocking=True)
+            _, bottleneck = backbone(images)
+            bottlenecks.append(bottleneck.float().cpu())
+            case_ids.extend(batch["case_id"])
+        return {"bottleneck": torch.cat(bottlenecks), "case_id": case_ids}
+
+    @torch.no_grad()
+    def run(self):
+        backbone = self._load_frozen_backbone()
+        train_loader, val_loader = self.data.extraction_loaders()
+        os.makedirs(self.config.features_dir, exist_ok=True)
+        print("extracting train split")
+        torch.save(self._bottlenecks_of(backbone, train_loader), self.config.train_features_path)
+        print("extracting val split")
+        torch.save(self._bottlenecks_of(backbone, val_loader), self.config.val_features_path)
+        print(f"features saved to {self.config.features_dir}")

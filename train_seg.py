@@ -4,7 +4,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import config
 from src.networks import SwinUNETRBackbone
-from src.image_data import get_seg_dataloaders
+from src.image_data import PetCtDataModule
 from utils.losses import seg_loss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
@@ -55,7 +55,7 @@ def main():
         use_checkpoint=config.use_checkpoint,
         pretrained_path=config.pretrained_path,
     ).to(device)
-    train_loader, val_loader = get_seg_dataloaders(config)
+    train_loader, val_loader = PetCtDataModule(config).segmentation_loaders()
     optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate,
                             weight_decay=config.weight_decay)
     scheduler = optim.lr_scheduler.PolynomialLR(

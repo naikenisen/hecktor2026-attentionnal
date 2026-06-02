@@ -1,10 +1,9 @@
 import numpy as np
 import pandas as pd
 import torch
-from typing import List, Optional, Dict
 
-CLINICAL_NUMERIC = ["Age"]
-CLINICAL_CATEGORICAL = [
+AGE_COLUMN = "Age"
+CATEGORICAL_COLUMNS = [
     "Gender",
     "Tobacco Consumption",
     "Alcohol Consumption",
@@ -12,91 +11,135 @@ CLINICAL_CATEGORICAL = [
     "HPV Status",
     "Treatment",
 ]
-assert len(CLINICAL_NUMERIC) + len(CLINICAL_CATEGORICAL) == 7
 T_STAGES = ["T1", "T2", "T3", "T4"]
 N_STAGES = ["N0", "N1", "N2", "N3"]
+UNKNOWN_CATEGORY = "Inconnu"
+UNKNOWN_STAGE = -1
 
 class ClinicalEncoder:
 
     def __init__(self):
-        self.age_median: Optional[float] = None
-        self.age_mean: Optional[float] = None
-        self.age_std: Optional[float] = None
-        self.cat_maps: Dict[str, Dict[str, int]] = {}
-        self.output_dim: Optional[int] = None
+        self.age_mean = 0.0
+        self.age_std = 1.0
+        self.age_median = 0.0
+        self.category_indices = {}
 
-    def fit(self, df: pd.DataFrame):
-        ages = df["Age"].dropna().values.astype(float)
-        self.age_median = float(np.median(ages)) if len(ages) else 0.0
-        self.age_mean = float(ages.mean()) if len(ages) else 0.0
-        self.age_std = float(ages.std()) if len(ages) and ages.std() > 1e-6 else 1.0
-        for col in CLINICAL_CATEGORICAL:
-            vals = df[col].dropna().astype(str).unique().tolist()
-            if "Inconnu" not in vals:
-                vals.append("Inconnu")
-            self.cat_maps[col] = {v: i for i, v in enumerate(sorted(vals))}
-        self.output_dim = 1 + sum(len(m) for m in self.cat_maps.values())
+    def fit(self, patients: pd.DataFrame):
+        ages = patients[AGE_COLUMN].dropna().to_numpy(dtype=float)
+        if len(ages):
+            self.age_median = float(np.median(ages))
+            self.age_mean = float(ages.mean())
+            self.age_std = float(ages.std()) if ages.std() > 1e-6 else 1.0
+        for column in CATEGORICAL_COLUMNS:
+            values = patients[column].dropna().astype(str).unique().tolist()
+            if UNKNOWN_CATEGORY not in values:
+                values.append(UNKNOWN_CATEGORY)
+            self.category_indices[column] = {value: i for i, value in enumerate(sorted(values))}
         return self
 
-    def transform_row(self, row: pd.Series) -> np.ndarray:
-        age = row.get("Age", np.nan)
-        if pd.isna(age):
-            age = self.age_median
-        age_z = (float(age) - self.age_mean) / self.age_std
-        feats = [age_z]
-        for col in CLINICAL_CATEGORICAL:
-            mapping = self.cat_maps[col]
-            val = row.get(col, np.nan)
-            val = "Inconnu" if pd.isna(val) else str(val)
-            idx = mapping.get(val, mapping["Inconnu"])
-            onehot = [0.0] * len(mapping)
-            onehot[idx] = 1.0
-            feats.extend(onehot)
-        return np.array(feats, dtype=np.float32)
+    @property
+    def output_dim(self) -> int:
+        return 1 + sum(len(indices) for indices in self.category_indices.values())
 
-def _encode_stage(value, stages: List[str]) -> int:
-    if value is None or (isinstance(value, float) and np.isnan(value)):
-        return -1
-    s = str(value).strip().upper()
-    if s.startswith("N2"):
-        s = "N2"
-    return stages.index(s) if s in stages else -1
+    def encode_row(self, row: pd.Series) -> np.ndarray:
+        age = row.get(AGE_COLUMN, np.nan)
+        age = self.age_median if pd.isna(age) else float(age)
+        features = [(age - self.age_mean) / self.age_std]
+        for column, indices in self.category_indices.items():
+            value = row.get(column, np.nan)
+            value = UNKNOWN_CATEGORY if pd.isna(value) else str(value)
+            position = indices.get(value, indices[UNKNOWN_CATEGORY])
+            one_hot = [0.0] * len(indices)
+            one_hot[position] = 1.0
+            features.extend(one_hot)
+        return np.array(features, dtype=np.float32)
 
-def _encode_targets(row, clin_enc) -> dict:
-    rfs = float(row.get("RFS", np.nan)) if not pd.isna(row.get("RFS", np.nan)) else 0.0
-    evt = int(row.get("Relapse", 0)) if not pd.isna(row.get("Relapse", np.nan)) else 0
-    return {
-        "clinical": torch.from_numpy(clin_enc.transform_row(row)),
-        "t_label":  torch.tensor(_encode_stage(row.get("T-stage"), T_STAGES), dtype=torch.long),
-        "n_label":  torch.tensor(_encode_stage(row.get("N-stage"), N_STAGES), dtype=torch.long),
-        "time":     torch.tensor(rfs, dtype=torch.float32),
-        "event":    torch.tensor(evt, dtype=torch.float32),
-    }
+class ClinicalDataset:
 
-def build_clinical_targets(case_ids, df, clin_enc) -> dict:
-    df_idx = df.set_index("PatientID")
-    rows = [_encode_targets(df_idx.loc[cid], clin_enc) for cid in case_ids]
-    out = {k: torch.stack([r[k] for r in rows]) for k in rows[0]}
-    out["case_id"] = list(case_ids)
-    return out
+    TENSOR_FIELDS = ("bottleneck", "clinical", "t_label", "n_label", "time", "event")
 
-def compute_bin_edges(train_df, n_bins: int) -> np.ndarray:
-    ev = train_df[train_df["Relapse"] == 1]["RFS"].dropna().values.astype(float)
-    if len(ev) < n_bins:
-        ev = train_df["RFS"].dropna().values.astype(float)
-    if len(ev) == 0:
-        return np.linspace(0, 1, n_bins + 1)
-    edges = np.quantile(ev, np.linspace(0, 1, n_bins + 1))
-    edges[0] = -np.inf
-    edges[-1] = np.inf
-    return edges
+    def __init__(self, tensors: dict, case_ids: list):
+        self.tensors = tensors
+        self.case_ids = case_ids
 
-def load_features(path: str, device) -> dict:
-    d = torch.load(path, map_location="cpu")
-    return d
+    @staticmethod
+    def _stage_index(value, stages: list) -> int:
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return UNKNOWN_STAGE
+        label = str(value).strip().upper()
+        if label.startswith("N2"):
+            label = "N2"
+        return stages.index(label) if label in stages else UNKNOWN_STAGE
 
-def class_weights(labels: torch.Tensor, num_classes: int, device) -> torch.Tensor:
-    valid = labels[labels >= 0]
-    counts = torch.bincount(valid, minlength=num_classes).float().clamp_min(1.0)
-    w = counts.sum() / (num_classes * counts)
-    return w.to(device)
+    @classmethod
+    def from_bottlenecks(cls, features: dict, patients: pd.DataFrame, encoder: ClinicalEncoder):
+        rows = patients.set_index("PatientID")
+        clinical, t_label, n_label, time, event = [], [], [], [], []
+        for case_id in features["case_id"]:
+            row = rows.loc[case_id]
+            clinical.append(torch.from_numpy(encoder.encode_row(row)))
+            t_label.append(cls._stage_index(row.get("T-stage"), T_STAGES))
+            n_label.append(cls._stage_index(row.get("N-stage"), N_STAGES))
+            relapse_free_survival = row.get("RFS", np.nan)
+            time.append(float(relapse_free_survival) if not pd.isna(relapse_free_survival) else 0.0)
+            relapse = row.get("Relapse", np.nan)
+            event.append(int(relapse) if not pd.isna(relapse) else 0)
+        tensors = {
+            "bottleneck": features["bottleneck"],
+            "clinical": torch.stack(clinical),
+            "t_label": torch.tensor(t_label, dtype=torch.long),
+            "n_label": torch.tensor(n_label, dtype=torch.long),
+            "time": torch.tensor(time, dtype=torch.float32),
+            "event": torch.tensor(event, dtype=torch.float32),
+        }
+        return cls(tensors, list(features["case_id"]))
+
+    def __len__(self) -> int:
+        return self.tensors["bottleneck"].size(0)
+
+    def batches(self, batch_size: int, device, shuffle: bool):
+        order = torch.randperm(len(self)) if shuffle else torch.arange(len(self))
+        for start in range(0, len(self), batch_size):
+            index = order[start:start + batch_size]
+            yield {field: self.tensors[field][index].to(device) for field in self.TENSOR_FIELDS}
+
+    def class_weights(self, field: str, num_classes: int, device) -> torch.Tensor:
+        labels = self.tensors[field]
+        observed = labels[labels >= 0]
+        counts = torch.bincount(observed, minlength=num_classes).float().clamp_min(1.0)
+        return (counts.sum() / (num_classes * counts)).to(device)
+
+class ClinicalDataModule:
+
+    def __init__(self, config):
+        self.config = config
+        self.patients = pd.read_csv(config.csv_path)
+        self.encoder = ClinicalEncoder()
+        self.train = None
+        self.val = None
+
+    def setup(self):
+        train_features = torch.load(self.config.train_features_path, map_location="cpu")
+        val_features = torch.load(self.config.val_features_path, map_location="cpu")
+        train_patients = self.patients[self.patients["PatientID"].isin(train_features["case_id"])]
+        self.encoder.fit(train_patients)
+        self.train = ClinicalDataset.from_bottlenecks(train_features, self.patients, self.encoder)
+        self.val = ClinicalDataset.from_bottlenecks(val_features, self.patients, self.encoder)
+        print(f"loaded {len(self.train)} train and {len(self.val)} val features")
+        return self
+
+    @property
+    def clinical_dim(self) -> int:
+        return self.encoder.output_dim
+
+    def survival_bin_edges(self) -> torch.Tensor:
+        train_patients = self.patients[self.patients["PatientID"].isin(self.train.case_ids)]
+        relapse_times = train_patients[train_patients["Relapse"] == 1]["RFS"].dropna().to_numpy(dtype=float)
+        if len(relapse_times) < self.config.n_time_bins:
+            relapse_times = train_patients["RFS"].dropna().to_numpy(dtype=float)
+        if len(relapse_times) == 0:
+            edges = np.linspace(0, 1, self.config.n_time_bins + 1)
+        else:
+            edges = np.quantile(relapse_times, np.linspace(0, 1, self.config.n_time_bins + 1))
+            edges[0], edges[-1] = -np.inf, np.inf
+        return torch.tensor(edges, dtype=torch.float32)
