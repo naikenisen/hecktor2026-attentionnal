@@ -9,6 +9,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import config
 from src.clinical_model import ClinicalModel
+from src.dataset import ClinicalEncoder, build_clinical_targets
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
 from utils.metrics import balanced_accuracy, discrete_risk_from_surv_logits, c_index
 
@@ -143,17 +144,24 @@ def main():
     for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
 
-    # Features pré-calculées
+    # Bottlenecks pré-calculés (backbone figé) : {bottleneck, case_id}
     train = load_features(config.train_features_path, device)
     val = load_features(config.val_features_path, device)
-    train_df = pd.read_csv(config.train_df_path)
     print(f"loaded {train['bottleneck'].size(0)} train and {val['bottleneck'].size(0)} val features")
 
-    # Aligne la dim du ClinicalMLP sur les vecteurs cliniques cachés (one-hot)
-    config.n_clinical_features = train["clinical"].size(1)
+    # Cibles cliniques assemblées depuis le CSV, alignées sur l'ordre des bottlenecks.
+    # L'encodeur est fitté uniquement sur les patients du train (pas de fuite val).
+    df = pd.read_csv(config.csv_path)
+    clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train["case_id"])])
+    train.update(build_clinical_targets(train["case_id"], df, clin_enc))
+    val.update(build_clinical_targets(val["case_id"], df, clin_enc))
+
+    # Aligne la dim du ClinicalMLP sur les vecteurs cliniques encodés (one-hot)
+    config.n_clinical_features = clin_enc.output_dim
     print(f"clinical feature dimension is {config.n_clinical_features}")
 
     # Bins temporels (quantiles sur les événements du train)
+    train_df = df[df["PatientID"].isin(train["case_id"])]
     bin_edges = torch.tensor(
         compute_bin_edges(train_df, config.n_time_bins),
         dtype=torch.float32, device=device,

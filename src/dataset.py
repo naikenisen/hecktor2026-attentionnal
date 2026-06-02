@@ -107,50 +107,62 @@ def _encode_stage(value, stages: List[str]) -> int:
     return stages.index(s) if s in stages else -1
 
 
-# Construit la liste de dictionnaires d'un split (train ou val) avec toutes les cibles
-def _build_data_list(case_ids, data_root, df, clinical_encoder) -> List[dict]:
-    # Liste des dicts à retourner, un par patient
+# Construit la liste de dicts d'un split : uniquement chemins d'images + identifiant.
+# Les cibles cliniques ne dépendent pas du backbone et sont assemblées séparément
+# (voir build_clinical_targets), donc elles ne transitent plus par le dataloader image.
+def _build_data_list(case_ids, data_root, df) -> List[dict]:
+    # Patients présents dans le CSV (les autres sont ignorés)
+    known = set(df["PatientID"])
     items = []
-    # Indexation du DataFrame par PatientID pour un accès O(1)
-    df_idx = df.set_index("PatientID")
     for cid in case_ids:
-        if cid not in df_idx.index:
+        if cid not in known:
             continue
         # Dossier du patient : {data_root}/{cid}/
         patient_dir = os.path.join(data_root, cid)
-        # Ligne CSV du patient courant
-        row = df_idx.loc[cid]
-        # Vecteur clinique encodé (7,)
-        clin = clinical_encoder.transform_row(row)
-        # Label T encodé en entier (−1 si inconnu)
-        t_lbl = _encode_stage(row.get("T-stage"), T_STAGES)
-        # Label N encodé en entier (−1 si inconnu)
-        n_lbl = _encode_stage(row.get("N-stage"), N_STAGES)
-        # Temps de suivi RFS en valeur flottante (0.0 si absent)
-        rfs = float(row.get("RFS", np.nan)) if not pd.isna(row.get("RFS", np.nan)) else 0.0
-        # Indicateur d'événement (1 = rechute, 0 = censuré)
-        evt = int(row.get("Relapse", 0)) if not pd.isna(row.get("Relapse", np.nan)) else 0
         items.append({
             # Chemin vers le fichier CT : {cid}/{cid}__CT.nii.gz
-            "ct":       os.path.join(patient_dir, f"{cid}__CT.nii.gz"),
+            "ct":      os.path.join(patient_dir, f"{cid}__CT.nii.gz"),
             # Chemin vers le fichier PET : {cid}/{cid}__PT.nii.gz
-            "pet":      os.path.join(patient_dir, f"{cid}__PT.nii.gz"),
+            "pet":     os.path.join(patient_dir, f"{cid}__PT.nii.gz"),
             # Chemin vers le masque de segmentation : {cid}/{cid}.nii.gz
-            "label":    os.path.join(patient_dir, f"{cid}.nii.gz"),
-            # Vecteur clinique encodé (7,) sous forme de tensor
-            "clinical": torch.from_numpy(clin),
-            # Classe de staging T comme tensor long
-            "t_label":  torch.tensor(t_lbl, dtype=torch.long),
-            # Classe de staging N comme tensor long
-            "n_label":  torch.tensor(n_lbl, dtype=torch.long),
-            # Temps de suivi RFS comme tensor float
-            "time":     torch.tensor(rfs, dtype=torch.float32),
-            # Indicateur d'événement comme tensor float
-            "event":    torch.tensor(evt, dtype=torch.float32),
-            # Identifiant patient pour le débogage et la traçabilité
-            "case_id":  cid,
+            "label":   os.path.join(patient_dir, f"{cid}.nii.gz"),
+            # Identifiant patient (clé de jointure avec les cibles cliniques)
+            "case_id": cid,
         })
     return items
+
+
+# Encode les cibles tabulaires d'un patient (clinique + T/N + survie) en tensors
+def _encode_targets(row, clin_enc) -> dict:
+    # Temps de suivi RFS (0.0 si absent)
+    rfs = float(row.get("RFS", np.nan)) if not pd.isna(row.get("RFS", np.nan)) else 0.0
+    # Indicateur d'événement (1 = rechute, 0 = censuré)
+    evt = int(row.get("Relapse", 0)) if not pd.isna(row.get("Relapse", np.nan)) else 0
+    return {
+        # Vecteur clinique encodé (output_dim,)
+        "clinical": torch.from_numpy(clin_enc.transform_row(row)),
+        # Classe de staging T (−1 si inconnu)
+        "t_label":  torch.tensor(_encode_stage(row.get("T-stage"), T_STAGES), dtype=torch.long),
+        # Classe de staging N (−1 si inconnu)
+        "n_label":  torch.tensor(_encode_stage(row.get("N-stage"), N_STAGES), dtype=torch.long),
+        "time":     torch.tensor(rfs, dtype=torch.float32),
+        "event":    torch.tensor(evt, dtype=torch.float32),
+    }
+
+
+# Assemble les tensors cliniques/cibles d'une liste de patients, empilés dans l'ordre
+# des case_ids fournis (typiquement l'ordre des bottlenecks extraits). 100 % CPU/CSV :
+# aucune dépendance au backbone. C'est le pendant clinique de l'extraction de features.
+def build_clinical_targets(case_ids, df, clin_enc) -> dict:
+    # Indexation du DataFrame par PatientID pour un accès O(1)
+    df_idx = df.set_index("PatientID")
+    # Une ligne encodée par patient, dans l'ordre fourni
+    rows = [_encode_targets(df_idx.loc[cid], clin_enc) for cid in case_ids]
+    # Empile chaque champ tensoriel sur la dimension batch
+    out = {k: torch.stack([r[k] for r in rows]) for k in rows[0]}
+    # Conserve l'ordre des identifiants pour la traçabilité / vérification d'alignement
+    out["case_id"] = list(case_ids)
+    return out
 
 
 # Découpe les patients en splits train/val de façon déterministe (même seed partout)
@@ -178,12 +190,8 @@ def get_seg_dataloaders(config) -> tuple:
 
     df = pd.read_csv(config.csv_path)
 
-    clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train_ids)])
-    config.n_clinical_features = clin_enc.output_dim
-    print(f"[Data] dim features cliniques (one-hot) = {clin_enc.output_dim}")
-
-    train_items = _build_data_list(train_ids, config.data_root, df, clin_enc)
-    val_items = _build_data_list(val_ids, config.data_root, df, clin_enc)
+    train_items = _build_data_list(train_ids, config.data_root, df)
+    val_items = _build_data_list(val_ids, config.data_root, df)
 
     train_ds = CacheDataset(
         data=train_items,
@@ -213,24 +221,15 @@ def get_seg_dataloaders(config) -> tuple:
 
 # Crée des loaders déterministes (transforms de validation, sans shuffle) pour
 # l'extraction de features : le backbone est figé, on veut un bottleneck reproductible.
+# Ne porte que les images + case_id ; les cibles cliniques sont assemblées en phase 2.
 def get_feature_extraction_loaders(config) -> tuple:
-    # Mêmes splits que l'entraînement multitâche
+    # Mêmes splits que l'entraînement de segmentation
     train_ids, val_ids = split_case_ids(config)
     print(f"[Extract] {len(train_ids)} train / {len(val_ids)} val")
 
-    # DataFrame complet des cibles
     df = pd.read_csv(config.csv_path)
-    # Encodeur clinique fitté uniquement sur le train (identique à l'entraînement)
-    clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train_ids)])
-    # Propage la dimension one-hot réelle à la config
-    config.n_clinical_features = clin_enc.output_dim
-    print(f"[Extract] dim features cliniques (one-hot) = {clin_enc.output_dim}")
-
-    # Listes de dicts par split
-    train_items = _build_data_list(train_ids, config.data_root, df, clin_enc)
-    val_items = _build_data_list(val_ids, config.data_root, df, clin_enc)
-    # Sous-DataFrame train pour les quantiles de bins temporels
-    train_df = df[df["PatientID"].isin([it["case_id"] for it in train_items])].copy()
+    train_items = _build_data_list(train_ids, config.data_root, df)
+    val_items = _build_data_list(val_ids, config.data_root, df)
 
     tf = get_validation_transforms(config)
     train_ds = CacheDataset(data=train_items, transform=tf,
@@ -247,4 +246,4 @@ def get_feature_extraction_loaders(config) -> tuple:
         val_ds, batch_size=config.batch_size, shuffle=False,
         num_workers=config.num_workers, pin_memory=True,
     )
-    return train_loader, val_loader, train_df
+    return train_loader, val_loader

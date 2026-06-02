@@ -20,8 +20,8 @@ from monai.transforms import (
 def get_multitask_train_transforms(config):
     # Clés des modalités images et du masque de segmentation
     keys = ["ct", "pet", "label"]
-    # Clés à conserver après le SelectItemsd (inclut les cibles tabulaires)
-    keep = ["image", "label", "clinical", "t_label", "n_label", "time", "event", "case_id"]
+    # Clés à conserver après le SelectItemsd (image fusionnée, masque, identifiant)
+    keep = ["image", "label", "case_id"]
 
     transforms = [
         # Charge les fichiers .nii.gz via SimpleITK (retourne (H, W, D), ajoute meta_dict)
@@ -75,7 +75,7 @@ def get_multitask_validation_transforms(config):
     # Clés des modalités et du masque
     keys = ["ct", "pet", "label"]
     # Clés conservées après la sélection (identiques à l'entraînement)
-    keep = ["image", "label", "clinical", "t_label", "n_label", "time", "event", "case_id"]
+    keep = ["image", "label", "case_id"]
     return Compose([
         # Charge les fichiers .nii.gz
         LoadImaged(keys=keys, image_only=False, ensure_channel_first=False),

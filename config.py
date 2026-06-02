@@ -98,5 +98,3 @@ best_clinical_path = os.path.join(checkpoint_dir, "best_clinical.pth")
 # Fichiers de features pré-calculées
 train_features_path = os.path.join(features_dir, "train.pt")
 val_features_path = os.path.join(features_dir, "val.pt")
-# CSV du train pour le calcul des bins temporels en phase 2
-train_df_path = os.path.join(features_dir, "train_df.csv")
