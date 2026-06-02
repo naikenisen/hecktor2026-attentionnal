@@ -131,3 +131,36 @@ def build_clinical_targets(case_ids, df, clin_enc) -> dict:
     # Conserve l'ordre des identifiants pour la traçabilité / vérification d'alignement
     out["case_id"] = list(case_ids)
     return out
+
+
+# Calcule les bornes des bins de survie par quantiles sur les temps d'événement du train
+def compute_bin_edges(train_df, n_bins: int) -> np.ndarray:
+    # Temps des patients avec un événement observé (rechute)
+    ev = train_df[train_df["Relapse"] == 1]["RFS"].dropna().values.astype(float)
+    if len(ev) < n_bins:
+        # Fallback sur tous les temps si trop peu d'événements
+        ev = train_df["RFS"].dropna().values.astype(float)
+    if len(ev) == 0:
+        return np.linspace(0, 1, n_bins + 1)
+    # Quantiles équiprobables définissant les bornes des bins
+    edges = np.quantile(ev, np.linspace(0, 1, n_bins + 1))
+    # Bornes infinies pour capturer tous les temps possibles
+    edges[0] = -np.inf
+    edges[-1] = np.inf
+    return edges
+
+
+# Charge un split de features pré-calculées (bottleneck + case_id) depuis un .pt
+def load_features(path: str, device) -> dict:
+    d = torch.load(path, map_location="cpu")
+    # Le bottleneck reste sur CPU (volumineux) : on l'indexe par batch au moment voulu
+    return d
+
+
+# Poids de classe inverses de fréquence (les labels −1 inconnus sont ignorés)
+def class_weights(labels: torch.Tensor, num_classes: int, device) -> torch.Tensor:
+    valid = labels[labels >= 0]
+    counts = torch.bincount(valid, minlength=num_classes).float().clamp_min(1.0)
+    # w_c = N / (K * n_c) — somme pondérée équilibrée entre classes
+    w = counts.sum() / (num_classes * counts)
+    return w.to(device)

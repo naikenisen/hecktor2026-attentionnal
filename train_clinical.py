@@ -6,86 +6,15 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tqdm import tqdm
 import config
-from src.networks import ClinicalModel, SwinUNETRBackbone
-from src.clinical_data import ClinicalEncoder, build_clinical_targets
-from src.image_data import get_feature_extraction_loaders
+from src.networks import ClinicalModel
+from src.clinical_data import (
+    ClinicalEncoder, build_clinical_targets,
+    compute_bin_edges, load_features, class_weights,
+)
+from src.image_data import extract_bottlenecks
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
 from utils.metrics import balanced_accuracy, discrete_risk_from_surv_logits, c_index
-
-
-# Calcule les bornes des bins de survie par quantiles sur les temps d'événement du train
-def compute_bin_edges(train_df, n_bins: int) -> np.ndarray:
-    # Temps des patients avec un événement observé (rechute)
-    ev = train_df[train_df["Relapse"] == 1]["RFS"].dropna().values.astype(float)
-    if len(ev) < n_bins:
-        # Fallback sur tous les temps si trop peu d'événements
-        ev = train_df["RFS"].dropna().values.astype(float)
-    if len(ev) == 0:
-        return np.linspace(0, 1, n_bins + 1)
-    # Quantiles équiprobables définissant les bornes des bins
-    edges = np.quantile(ev, np.linspace(0, 1, n_bins + 1))
-    # Bornes infinies pour capturer tous les temps possibles
-    edges[0] = -np.inf
-    edges[-1] = np.inf
-    return edges
-
-
-# Passe tout un split dans le backbone figé et collecte uniquement les bottlenecks.
-# Les case_id permettent de joindre ensuite les cibles cliniques (depuis le CSV).
-@torch.no_grad()
-def _extract_split(model, loader, device):
-    feats, ids = [], []
-    for batch in tqdm(loader, desc="Extract", leave=False):
-        ct_pet = batch["image"].to(device, non_blocking=True)
-        _, bottleneck = model(ct_pet)
-        feats.append(bottleneck.float().cpu())
-        ids.extend(batch["case_id"])
-    return {
-        "bottleneck": torch.cat(feats),
-        "case_id":    ids,
-    }
-
-
-# Lance le backbone de segmentation figé pour produire les .pt de bottlenecks
-@torch.no_grad()
-def _extract_bottlenecks(config, device):
-    model = SwinUNETRBackbone(
-        input_channels=config.input_channels,
-        num_classes=config.num_seg_classes,
-        feature_size=config.feature_size,
-        use_checkpoint=config.use_checkpoint,
-        pretrained_path=config.pretrained_path,
-    ).to(device)
-    # Charge les poids du meilleur modèle de segmentation, puis fige
-    model.load_state_dict(torch.load(config.best_seg_path, map_location=device))
-    model.eval()
-
-    # Loaders déterministes (transforms de validation, sans shuffle)
-    train_loader, val_loader = get_feature_extraction_loaders(config)
-    os.makedirs(config.features_dir, exist_ok=True)
-    print("extracting train split")
-    torch.save(_extract_split(model, train_loader, device), config.train_features_path)
-    print("extracting val split")
-    torch.save(_extract_split(model, val_loader, device), config.val_features_path)
-    print(f"features saved to {config.features_dir}")
-
-
-# Charge un split de features pré-calculées et déplace les tenseurs cibles sur le device
-def load_features(path: str, device) -> dict:
-    d = torch.load(path, map_location="cpu")
-    # Le bottleneck reste sur CPU (volumineux) : on l'indexe par batch au moment voulu
-    return d
-
-
-# Poids de classe inverses de fréquence (les labels −1 inconnus sont ignorés)
-def class_weights(labels: torch.Tensor, num_classes: int, device) -> torch.Tensor:
-    valid = labels[labels >= 0]
-    counts = torch.bincount(valid, minlength=num_classes).float().clamp_min(1.0)
-    # w_c = N / (K * n_c) — somme pondérée équilibrée entre classes
-    w = counts.sum() / (num_classes * counts)
-    return w.to(device)
 
 
 # Entraîne les têtes sur un epoch complet à partir des features cachées
@@ -186,7 +115,7 @@ def main():
         os.makedirs(d, exist_ok=True)
 
     # Extrait les bottlenecks depuis le backbone figé (à chaque run)
-    _extract_bottlenecks(config, device)
+    extract_bottlenecks(config, device)
 
     # Bottlenecks pré-calculés (backbone figé) : {bottleneck, case_id}
     train = load_features(config.train_features_path, device)
