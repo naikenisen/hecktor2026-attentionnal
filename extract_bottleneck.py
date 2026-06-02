@@ -4,7 +4,7 @@ import os
 import torch
 from tqdm import tqdm
 import config
-from src.swinunetr import SwinUNETRBackbone
+from src.networks import SwinUNETRBackbone
 from src.dataset import get_feature_extraction_loaders
 
 

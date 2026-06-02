@@ -5,7 +5,7 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 import config
-from src.swinunetr import SwinUNETRBackbone
+from src.networks import SwinUNETRBackbone
 from src.dataset import get_seg_dataloaders
 from utils.losses import seg_loss
 from monai.metrics import DiceMetric
