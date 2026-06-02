@@ -11,6 +11,8 @@ from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
 from utils.metrics import balanced_accuracy, discrete_risk_from_surv_logits, c_index
 
 class ClinicalTrainer:
+    """Entraîne la branche clinique sur les bottlenecks figés : boucle multitâche
+    (T, N, survie), validation périodique et sauvegarde du meilleur modèle."""
 
     def __init__(self, config, device, data: ClinicalDataModule):
         self.config = config

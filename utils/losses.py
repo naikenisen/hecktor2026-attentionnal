@@ -12,6 +12,8 @@ t_loss = nn.CrossEntropyLoss(ignore_index=-1)
 n_loss = nn.CrossEntropyLoss(ignore_index=-1)
 
 class DeepHitDiscreteLoss(nn.Module):
+    """Loss de survie discrète façon DeepHit : vraisemblance négative sur les bins
+    (événement vs censure) plus un terme de ranking par paires de patients."""
 
     def __init__(self, alpha: float = 0.2, sigma: float = 0.1):
         super().__init__()
@@ -55,6 +57,8 @@ class DeepHitDiscreteLoss(nn.Module):
         return l_nll + self.alpha * rank_loss
 
 class UncertaintyWeightedLoss(nn.Module):
+    """Combine plusieurs pertes de tâches en les pondérant par une incertitude apprise
+    (homoscédastique), via des log-variances entraînables par tâche."""
 
     def __init__(self, n_tasks: int = 4, log_sigma_min: float = -3.0,
                  log_sigma_max: float = 3.0):

@@ -17,6 +17,8 @@ UNKNOWN_CATEGORY = "Inconnu"
 UNKNOWN_STAGE = -1
 
 class ClinicalEncoder:
+    """Apprend sur le train les statistiques d'âge et les catégories observées, puis
+    transforme chaque patient en vecteur numérique (âge standardisé + one-hot)."""
 
     def __init__(self):
         self.age_mean = 0.0
@@ -55,6 +57,8 @@ class ClinicalEncoder:
         return np.array(features, dtype=np.float32)
 
 class ClinicalDataset:
+    """Tensors en mémoire d'un split : bottlenecks figés joints aux cibles tabulaires
+    (clinique, stades T/N, survie), itérables par batch et alignés par case_id."""
 
     TENSOR_FIELDS = ("bottleneck", "clinical", "t_label", "n_label", "time", "event")
 
@@ -110,6 +114,8 @@ class ClinicalDataset:
         return (counts.sum() / (num_classes * counts)).to(device)
 
 class ClinicalDataModule:
+    """Charge les bottlenecks des deux splits, ajuste l'encodeur clinique sur le train
+    et expose les datasets, la dimension clinique et les bornes de survie."""
 
     def __init__(self, config):
         self.config = config

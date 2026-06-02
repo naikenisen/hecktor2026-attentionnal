@@ -27,6 +27,8 @@ MODALITY_KEYS = ["ct", "pet"]
 SAMPLE_KEYS = ["image", "label", "case_id"]
 
 class PetCtTransforms:
+    """Fabrique les pipelines MONAI qui chargent CT+PET+masque et les fusionnent en
+    volume bimodal : augmenté à l'entraînement, déterministe en validation."""
 
     @staticmethod
     def train(config) -> Compose:
@@ -76,6 +78,8 @@ class PetCtTransforms:
         ])
 
 class PetCtDataModule:
+    """Partitionne les patients en train/val et construit les DataLoaders cachés, aussi
+    bien pour l'entraînement de la segmentation que pour l'extraction des features."""
 
     def __init__(self, config):
         self.config = config
@@ -94,7 +98,7 @@ class PetCtDataModule:
         print(f"{len(train_ids)} train / {len(val_ids)} val")
         return train_ids, val_ids
 
-    def _records(self, case_ids: list) -> list:
+    def _build_records(self, case_ids: list) -> list:
         records = []
         for case_id in case_ids:
             if case_id not in self.known_patients:
@@ -108,9 +112,9 @@ class PetCtDataModule:
             })
         return records
 
-    def _loader(self, case_ids: list, transforms: Compose, *, shuffle: bool, drop_last: bool) -> DataLoader:
+    def _build_loader(self, case_ids: list, transforms: Compose, *, shuffle: bool, drop_last: bool) -> DataLoader:
         dataset = CacheDataset(
-            data=self._records(case_ids), transform=transforms,
+            data=self._build_records(case_ids), transform=transforms,
             cache_rate=self.config.cache_rate, num_workers=self.config.num_workers,
         )
         return DataLoader(
@@ -120,19 +124,21 @@ class PetCtDataModule:
         )
 
     def segmentation_loaders(self) -> tuple:
-        train_loader = self._loader(self.train_ids, PetCtTransforms.train(self.config),
+        train_loader = self._build_loader(self.train_ids, PetCtTransforms.train(self.config),
                                     shuffle=True, drop_last=True)
-        val_loader = self._loader(self.val_ids, PetCtTransforms.validation(self.config),
+        val_loader = self._build_loader(self.val_ids, PetCtTransforms.validation(self.config),
                                   shuffle=False, drop_last=False)
         return train_loader, val_loader
 
     def extraction_loaders(self) -> tuple:
         transforms = PetCtTransforms.validation(self.config)
-        train_loader = self._loader(self.train_ids, transforms, shuffle=False, drop_last=False)
-        val_loader = self._loader(self.val_ids, transforms, shuffle=False, drop_last=False)
+        train_loader = self._build_loader(self.train_ids, transforms, shuffle=False, drop_last=False)
+        val_loader = self._build_loader(self.val_ids, transforms, shuffle=False, drop_last=False)
         return train_loader, val_loader
 
 class BottleneckExtractor:
+    """Recharge le backbone de segmentation figé et sauvegarde sur disque le bottleneck
+    de chaque patient, indexé par case_id, pour les deux splits."""
 
     def __init__(self, config, device):
         self.config = config

@@ -3,6 +3,8 @@ import torch.nn as nn
 from monai.networks.nets import SwinUNETR
 
 class SwinUNETRBackbone(nn.Module):
+    """SwinUNETR de segmentation dont le forward expose aussi la carte de bottleneck
+    profonde, réutilisée comme features figées par la branche clinique."""
 
     def __init__(self, input_channels: int, num_classes: int, feature_size: int,
                  use_checkpoint: bool, pretrained_path: str | None = None):
@@ -35,6 +37,8 @@ class SwinUNETRBackbone(nn.Module):
         return seg_logits, bottleneck
 
 class TNHead(nn.Module):
+    """Classe un stade T ou N depuis le bottleneck ; renvoie aussi la feature
+    intermédiaire, réutilisée comme token dans la fusion par attention."""
 
     def __init__(self, in_channels: int, hidden_dim: int = 256, num_classes: int = 4):
         super().__init__()
@@ -53,6 +57,7 @@ class TNHead(nn.Module):
         return feat, logits
 
 class SurvivalHead(nn.Module):
+    """Projette le token fusionné vers un logit de survie par intervalle de temps discret."""
 
     def __init__(self, d_model: int, hidden_dim: int = 256, n_time_bins: int = 10):
         super().__init__()
@@ -67,6 +72,8 @@ class SurvivalHead(nn.Module):
         return self.net(x)
 
 class ClinicalMLP(nn.Module):
+    """Projette le vecteur clinique tabulaire en un token de la dimension du modèle,
+    prêt à servir de requête dans la cross-attention."""
 
     def __init__(self, n_features: int = 7, hidden_dim: int = 64, d_model: int = 256):
         super().__init__()
@@ -81,6 +88,8 @@ class ClinicalMLP(nn.Module):
         return self.net(x).unsqueeze(1)
 
 class CrossAttentionFusion(nn.Module):
+    """Laisse les tokens (CLS, clinique, T/N) interroger le bottleneck spatial par
+    cross-attention et ne renvoie que le token CLS enrichi."""
 
     def __init__(self, bottleneck_channels: int, d_model: int = 256, n_heads: int = 4,
                  dropout: float = 0.1):
@@ -114,6 +123,8 @@ class CrossAttentionFusion(nn.Module):
         return x[:, 0]
 
 class ClinicalModel(nn.Module):
+    """Branche pronostique de phase 2 : depuis un bottleneck figé et les données
+    cliniques, prédit les stades T/N et la survie via fusion par attention."""
 
     def __init__(self, config):
         super().__init__()
