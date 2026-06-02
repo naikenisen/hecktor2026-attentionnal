@@ -7,7 +7,7 @@ num_t_classes = 4
 num_n_classes = 3
 spatial_size = (128, 128, 128)
 feature_size = 48
-use_checkpoint = True
+use_checkpoint = False
 pretrained_path = "utils/model_swinvit.pt"
 bottleneck_channels = 768
 d_model = 256
@@ -16,13 +16,14 @@ n_clinical_features = 22
 hidden_tn = 256
 n_time_bins = 10
 surv_hidden = 256
-batch_size = 2
+batch_size = 4
 
 # Segmentation training
-seg_epochs = 300
+seg_search_epochs = 50          # epochs par trial pendant la HP search
+seg_final_epochs = 200          # epochs du retrain final avec les meilleurs HP
 seg_grad_clip_norm = 1.0
-seg_n_trials = 30
-seg_prune_warmup_epochs = 10
+seg_n_trials = 20               # trials par worker (4 workers = 80 trials totaux)
+seg_search_timeout_hours = 6    # mur de temps de la HP search par worker
 
 # Clinical training
 clinical_batch_size = 64
