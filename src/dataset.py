@@ -183,39 +183,35 @@ def split_case_ids(config) -> tuple:
     return case_ids[n_val:], case_ids[:n_val]
 
 
-# Crée les DataLoaders train et val pour l'entraînement de la segmentation
-def get_seg_dataloaders(config) -> tuple:
+# Construit les listes d'items (images + case_id) des deux splits, partagé par les
+# deux points d'entrée (entraînement segmentation et extraction de features).
+def _prepare_items(config, tag: str) -> tuple:
     train_ids, val_ids = split_case_ids(config)
-    print(f"[Data] {len(train_ids)} train / {len(val_ids)} val")
-
+    print(f"[{tag}] {len(train_ids)} train / {len(val_ids)} val")
     df = pd.read_csv(config.csv_path)
+    return (_build_data_list(train_ids, config.data_root, df),
+            _build_data_list(val_ids, config.data_root, df))
 
-    train_items = _build_data_list(train_ids, config.data_root, df)
-    val_items = _build_data_list(val_ids, config.data_root, df)
 
-    train_ds = CacheDataset(
-        data=train_items,
-        transform=get_train_transforms(config),
-        cache_rate=config.cache_rate,
-        num_workers=config.num_workers,
-    )
-    val_ds = CacheDataset(
-        data=val_items,
-        transform=get_validation_transforms(config),
-        cache_rate=config.cache_rate,
-        num_workers=config.num_workers,
-    )
-
-    train_loader = DataLoader(
-        train_ds, batch_size=config.batch_size, shuffle=True,
-        num_workers=config.num_workers, pin_memory=True, drop_last=True,
-        persistent_workers=config.num_workers > 0,
-    )
-    val_loader = DataLoader(
-        val_ds, batch_size=config.batch_size, shuffle=False,
+# Enveloppe une liste d'items dans un CacheDataset + DataLoader avec les options voulues
+def _make_loader(items, transform, config, *, shuffle: bool, drop_last: bool) -> DataLoader:
+    ds = CacheDataset(data=items, transform=transform,
+                      cache_rate=config.cache_rate, num_workers=config.num_workers)
+    return DataLoader(
+        ds, batch_size=config.batch_size, shuffle=shuffle, drop_last=drop_last,
         num_workers=config.num_workers, pin_memory=True,
         persistent_workers=config.num_workers > 0,
     )
+
+
+# Crée les DataLoaders train et val pour l'entraînement de la segmentation
+# (augmentation au train, shuffle + drop_last pour des batchs complets).
+def get_seg_dataloaders(config) -> tuple:
+    train_items, val_items = _prepare_items(config, "Data")
+    train_loader = _make_loader(train_items, get_train_transforms(config), config,
+                                shuffle=True, drop_last=True)
+    val_loader = _make_loader(val_items, get_validation_transforms(config), config,
+                              shuffle=False, drop_last=False)
     return train_loader, val_loader
 
 
@@ -223,27 +219,9 @@ def get_seg_dataloaders(config) -> tuple:
 # l'extraction de features : le backbone est figé, on veut un bottleneck reproductible.
 # Ne porte que les images + case_id ; les cibles cliniques sont assemblées en phase 2.
 def get_feature_extraction_loaders(config) -> tuple:
-    # Mêmes splits que l'entraînement de segmentation
-    train_ids, val_ids = split_case_ids(config)
-    print(f"[Extract] {len(train_ids)} train / {len(val_ids)} val")
-
-    df = pd.read_csv(config.csv_path)
-    train_items = _build_data_list(train_ids, config.data_root, df)
-    val_items = _build_data_list(val_ids, config.data_root, df)
-
+    train_items, val_items = _prepare_items(config, "Extract")
     tf = get_validation_transforms(config)
-    train_ds = CacheDataset(data=train_items, transform=tf,
-                            cache_rate=config.cache_rate, num_workers=config.num_workers)
-    val_ds = CacheDataset(data=val_items, transform=tf,
-                          cache_rate=config.cache_rate, num_workers=config.num_workers)
-
-    # Loaders sans shuffle ni drop_last : on veut tous les patients, dans l'ordre
-    train_loader = DataLoader(
-        train_ds, batch_size=config.batch_size, shuffle=False,
-        num_workers=config.num_workers, pin_memory=True,
-    )
-    val_loader = DataLoader(
-        val_ds, batch_size=config.batch_size, shuffle=False,
-        num_workers=config.num_workers, pin_memory=True,
-    )
+    # Sans shuffle ni drop_last : on veut tous les patients, dans l'ordre
+    train_loader = _make_loader(train_items, tf, config, shuffle=False, drop_last=False)
+    val_loader = _make_loader(val_items, tf, config, shuffle=False, drop_last=False)
     return train_loader, val_loader
