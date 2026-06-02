@@ -196,37 +196,26 @@ def split_case_ids(config) -> tuple:
     return case_ids[n_val:], case_ids[:n_val]
 
 
-# Crée les DataLoaders train et val ainsi que le DataFrame d'entraînement pour les quantiles
-def get_multitask_dataloaders(config) -> tuple:
-    # Splits déterministes partagés avec l'extraction de features
+# Crée les DataLoaders train et val pour l'entraînement de la segmentation
+def get_seg_dataloaders(config) -> tuple:
     train_ids, val_ids = split_case_ids(config)
     print(f"[Data] {len(train_ids)} train / {len(val_ids)} val")
 
-    # DataFrame complet des données cliniques et cibles
     df = pd.read_csv(config.csv_path)
 
-    # Encodeur clinique fitté uniquement sur les données d'entraînement
     clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train_ids)])
-    # Propage la dimension one-hot réelle à la config (lue par le ClinicalMLP)
     config.n_clinical_features = clin_enc.output_dim
     print(f"[Data] dim features cliniques (one-hot) = {clin_enc.output_dim}")
 
-    # Liste de dicts des patients d'entraînement
     train_items = _build_data_list(train_ids, config.data_root, df, clin_enc)
-    # Liste de dicts des patients de validation
     val_items = _build_data_list(val_ids, config.data_root, df, clin_enc)
 
-    # Sous-DataFrame d'entraînement utilisé pour calculer les quantiles de temps
-    train_df = df[df["PatientID"].isin([it["case_id"] for it in train_items])].copy()
-
-    # Dataset MONAI mis en cache pour l'entraînement
     train_ds = HECKTORMultitaskDataset(
         data_list=train_items,
         transform=get_train_transforms(config),
         cache_rate=config.cache_rate,
         num_workers=config.num_workers,
     )
-    # Dataset MONAI mis en cache pour la validation
     val_ds = HECKTORMultitaskDataset(
         data_list=val_items,
         transform=get_validation_transforms(config),
@@ -234,19 +223,17 @@ def get_multitask_dataloaders(config) -> tuple:
         num_workers=config.num_workers,
     )
 
-    # DataLoader d'entraînement avec shuffle et drop_last pour les batchs incomplets
     train_loader = DataLoader(
         train_ds, batch_size=config.batch_size, shuffle=True,
         num_workers=config.num_workers, pin_memory=True, drop_last=True,
         persistent_workers=config.num_workers > 0,
     )
-    # DataLoader de validation sans shuffle
     val_loader = DataLoader(
         val_ds, batch_size=config.batch_size, shuffle=False,
         num_workers=config.num_workers, pin_memory=True,
         persistent_workers=config.num_workers > 0,
     )
-    return train_loader, val_loader, train_df, clin_enc
+    return train_loader, val_loader
 
 
 # Crée des loaders déterministes (transforms de validation, sans shuffle) pour

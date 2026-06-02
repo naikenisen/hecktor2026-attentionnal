@@ -6,7 +6,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import config
 from src.swinunetr import SwinUNETRBackbone
-from src.dataset import get_multitask_dataloaders
+from src.dataset import get_seg_dataloaders
 from utils.losses import seg_loss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
@@ -71,8 +71,7 @@ def main():
         pretrained_path=config.pretrained_path,
     ).to(device)
 
-    # DataLoaders (les champs tabulaires sont présents mais ignorés ici)
-    train_loader, val_loader, _train_df, _clin = get_multitask_dataloaders(config)
+    train_loader, val_loader = get_seg_dataloaders(config)
 
     optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate,
                             weight_decay=config.weight_decay)
