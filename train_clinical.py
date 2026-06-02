@@ -9,7 +9,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import config
 from src.networks import ClinicalModel
-from src.dataset import ClinicalEncoder, build_clinical_targets
+from src.clinical_data import ClinicalEncoder, build_clinical_targets
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
 from utils.metrics import balanced_accuracy, discrete_risk_from_surv_logits, c_index
 

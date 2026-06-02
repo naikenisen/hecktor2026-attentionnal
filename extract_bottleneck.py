@@ -5,7 +5,7 @@ import torch
 from tqdm import tqdm
 import config
 from src.networks import SwinUNETRBackbone
-from src.dataset import get_feature_extraction_loaders
+from src.image_data import get_feature_extraction_loaders
 
 
 # Passe tout un split dans le backbone figé et collecte uniquement les bottlenecks.

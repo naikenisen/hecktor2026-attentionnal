@@ -6,7 +6,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import config
 from src.networks import SwinUNETRBackbone
-from src.dataset import get_seg_dataloaders
+from src.image_data import get_seg_dataloaders
 from utils.losses import seg_loss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
