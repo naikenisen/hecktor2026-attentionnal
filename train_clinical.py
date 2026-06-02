@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os
 import numpy as np
 import pandas as pd
@@ -16,8 +14,6 @@ from src.image_data import extract_bottlenecks
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
 from utils.metrics import balanced_accuracy, discrete_risk_from_surv_logits, c_index
 
-
-# Entraîne les têtes sur un epoch complet à partir des features cachées
 def train_one_epoch(model, data, idx_perm, optimizer, weighting, deephit,
                     ce_t, ce_n, bin_edges, device, config):
     model.train()
@@ -27,7 +23,7 @@ def train_one_epoch(model, data, idx_perm, optimizer, weighting, deephit,
 
     for i in range(0, len(idx_perm), bs):
         idx = idx_perm[i:i + bs]
-        # Bottleneck du batch (déplacé sur GPU à la volée)
+
         bn = data["bottleneck"][idx].to(device, non_blocking=True)
         clin = data["clinical"][idx].to(device, non_blocking=True)
         t_lbl = data["t_label"][idx].to(device)
@@ -39,7 +35,6 @@ def train_one_epoch(model, data, idx_perm, optimizer, weighting, deephit,
         l_t = ce_t(out["t_logits"], t_lbl)
         l_n = ce_n(out["n_logits"], n_lbl)
 
-        # Survie : on n'utilise que les patients avec un temps valide (RFS connu > 0)
         valid = times > 0
         if valid.any():
             l_srv = deephit(out["surv_logits"][valid], times[valid],
@@ -47,7 +42,6 @@ def train_one_epoch(model, data, idx_perm, optimizer, weighting, deephit,
         else:
             l_srv = torch.tensor(0.0, device=device)
 
-        # Pondération automatique par incertitude sur les 3 tâches
         loss, _ = weighting(l_t, l_n, l_srv)
 
         if not torch.isfinite(loss):
@@ -67,8 +61,6 @@ def train_one_epoch(model, data, idx_perm, optimizer, weighting, deephit,
 
     return total_loss / max(n_batches, 1)
 
-
-# Évalue les têtes sur le split de validation (BalAcc T/N, C-index)
 @torch.no_grad()
 def validate(model, data, bin_edges, device, config):
     model.eval()
@@ -95,7 +87,7 @@ def validate(model, data, bin_edges, device, config):
         all_e.extend(data["event"][idx].numpy().tolist())
 
     risks, all_t, all_e = np.array(risks), np.array(all_t), np.array(all_e)
-    # C-index calculé uniquement sur les patients à temps valide
+
     valid = all_t > 0
     ci = c_index(risks[valid], all_t[valid], all_e[valid]) if valid.any() else 0.5
 
@@ -105,35 +97,27 @@ def validate(model, data, bin_edges, device, config):
         "c_index": ci,
     }
 
-
 def main():
     device = torch.device("cuda")
     print(f"using device {device} - {torch.cuda.get_device_name(device)}")
 
-    # Crée les dossiers de sortie (chemins définis dans config.py)
     for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
 
-    # Extrait les bottlenecks depuis le backbone figé (à chaque run)
     extract_bottlenecks(config, device)
 
-    # Bottlenecks pré-calculés (backbone figé) : {bottleneck, case_id}
     train = load_features(config.train_features_path, device)
     val = load_features(config.val_features_path, device)
     print(f"loaded {train['bottleneck'].size(0)} train and {val['bottleneck'].size(0)} val features")
 
-    # Cibles cliniques assemblées depuis le CSV, alignées sur l'ordre des bottlenecks.
-    # L'encodeur est fitté uniquement sur les patients du train (pas de fuite val).
     df = pd.read_csv(config.csv_path)
     clin_enc = ClinicalEncoder().fit(df[df["PatientID"].isin(train["case_id"])])
     train.update(build_clinical_targets(train["case_id"], df, clin_enc))
     val.update(build_clinical_targets(val["case_id"], df, clin_enc))
 
-    # Aligne la dim du ClinicalMLP sur les vecteurs cliniques encodés (one-hot)
     config.n_clinical_features = clin_enc.output_dim
     print(f"clinical feature dimension is {config.n_clinical_features}")
 
-    # Bins temporels (quantiles sur les événements du train)
     train_df = df[df["PatientID"].isin(train["case_id"])]
     bin_edges = torch.tensor(
         compute_bin_edges(train_df, config.n_time_bins),
@@ -144,10 +128,9 @@ def main():
     n_params = sum(p.numel() for p in model.parameters())
     print(f"clinical heads have {n_params:,} parameters")
 
-    # 3 tâches désormais : T, N, survie
     weighting = UncertaintyWeightedLoss(n_tasks=3).to(device)
     deephit = DeepHitDiscreteLoss(alpha=0.2).to(device)
-    # CrossEntropy pondérées par l'inverse des fréquences de classe
+
     ce_t = nn.CrossEntropyLoss(ignore_index=-1,
                                weight=class_weights(train["t_label"], config.num_t_classes, device))
     ce_n = nn.CrossEntropyLoss(ignore_index=-1,
@@ -165,7 +148,7 @@ def main():
     N_train = train["bottleneck"].size(0)
 
     for epoch in range(config.clinical_epochs):
-        # Permutation aléatoire des indices d'entraînement
+
         perm = torch.randperm(N_train)
         train_loss = train_one_epoch(
             model, train, perm, optimizer, weighting, deephit,
@@ -178,7 +161,6 @@ def main():
             print(f"validation balacc T {metrics['bal_t']:.4f} "
                   f"balacc N {metrics['bal_n']:.4f} c-index {metrics['c_index']:.4f}")
 
-            # Métrique combinée : moyenne des 3 tâches cliniques
             combined = (metrics["bal_t"] + metrics["bal_n"] + metrics["c_index"]) / 3
             if combined > best_metric:
                 best_metric = combined
@@ -188,7 +170,6 @@ def main():
         scheduler.step()
 
     print("clinical training complete")
-
 
 if __name__ == "__main__":
     main()

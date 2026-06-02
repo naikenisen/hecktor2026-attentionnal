@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os
 import torch
 import torch.optim as optim
@@ -12,18 +10,16 @@ from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
 from monai.data import decollate_batch
 
-
-# Entraîne la segmentation sur un epoch complet et retourne la perte moyenne
 def train_one_epoch(model, loader, optimizer, device, config):
     model.train()
     total_loss = 0.0
     n_batches = 0
     for batch in tqdm(loader, desc="Train", leave=False):
-        # Images bimodales CT+PET
+
         ct_pet = batch["image"].to(device, non_blocking=True)
-        # Masque de segmentation de référence
+
         seg_gt = batch["label"].to(device, non_blocking=True)
-        # Forward : on ne garde que les logits de segmentation
+
         seg_logits, _ = model(ct_pet)
         loss = seg_loss(seg_logits, seg_gt)
         optimizer.zero_grad(set_to_none=True)
@@ -34,8 +30,6 @@ def train_one_epoch(model, loader, optimizer, device, config):
         n_batches += 1
     return total_loss / max(n_batches, 1)
 
-
-# Évalue la segmentation : Dice moyen (hors fond) sur le split de validation
 @torch.no_grad()
 def validate(model, loader, device, config):
     model.eval()
@@ -55,11 +49,9 @@ def validate(model, loader, device, config):
     dice_metric.reset()
     return dice
 
-
 def main():
     device = torch.device("cuda")
 
-    # Crée les dossiers de sortie (chemins définis dans config.py)
     for d in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(d, exist_ok=True)
 
@@ -88,7 +80,6 @@ def main():
             torch.save(model.state_dict(), config.best_seg_path)
             print(f"saved best model")
         scheduler.step()
-
 
 if __name__ == "__main__":
     main()
