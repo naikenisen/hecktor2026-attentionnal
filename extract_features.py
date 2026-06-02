@@ -38,7 +38,7 @@ def _extract_split(model, loader, device):
 def extract_features(model, config, device):
     model.eval()
     # Loaders déterministes (transforms de validation, sans shuffle)
-    train_loader, val_loader, train_df, _ = get_feature_extraction_loaders(config)
+    train_loader, val_loader, train_df = get_feature_extraction_loaders(config)
     os.makedirs(config.features_dir, exist_ok=True)
 
     print("extracting train split")

@@ -96,7 +96,7 @@ class ClinicalEncoder:
 
 
 # Convertit un label T ou N brut en entier (retourne -1 si inconnu pour ignore_index PyTorch)
-def _encode_stage(value, stages: List[str], unknown_idx: int = 0) -> int:
+def _encode_stage(value, stages: List[str]) -> int:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return -1
     # Normalise en majuscules et supprime les espaces
@@ -247,4 +247,4 @@ def get_feature_extraction_loaders(config) -> tuple:
         val_ds, batch_size=config.batch_size, shuffle=False,
         num_workers=config.num_workers, pin_memory=True,
     )
-    return train_loader, val_loader, train_df, clin_enc
+    return train_loader, val_loader, train_df
