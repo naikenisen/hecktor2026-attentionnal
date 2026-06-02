@@ -107,31 +107,6 @@ def _encode_stage(value, stages: List[str], unknown_idx: int = 0) -> int:
     return stages.index(s) if s in stages else -1
 
 
-# Dataset MONAI multitâche qui fournit images, cibles de segmentation et données tabulaires
-class HECKTORMultitaskDataset(CacheDataset):
-
-    # Délègue l'initialisation à CacheDataset avec les transforms multitâche
-    def __init__(self, data_list, transform, cache_rate, num_workers):
-        super().__init__(data=data_list, transform=transform,
-                         cache_rate=cache_rate, num_workers=num_workers)
-
-    # Retourne un sample enrichi avec les champs tabulaires (clinical, t_label, etc.)
-    def __getitem__(self, idx):
-        # Sample(s) fourni par CacheDataset après application des transforms
-        item = super().__getitem__(idx)
-        if isinstance(item, list):
-            for s in item:
-                s.update(self._tabular(s))
-            return item
-        item.update(self._tabular(item))
-        return item
-
-    # Stub de merge tabulaire : les champs sont déjà présents via le data_list initial
-    @staticmethod
-    def _tabular(sample):
-        return {}
-
-
 # Construit la liste de dictionnaires d'un split (train ou val) avec toutes les cibles
 def _build_data_list(case_ids, data_root, df, clinical_encoder) -> List[dict]:
     # Liste des dicts à retourner, un par patient
@@ -210,14 +185,14 @@ def get_seg_dataloaders(config) -> tuple:
     train_items = _build_data_list(train_ids, config.data_root, df, clin_enc)
     val_items = _build_data_list(val_ids, config.data_root, df, clin_enc)
 
-    train_ds = HECKTORMultitaskDataset(
-        data_list=train_items,
+    train_ds = CacheDataset(
+        data=train_items,
         transform=get_train_transforms(config),
         cache_rate=config.cache_rate,
         num_workers=config.num_workers,
     )
-    val_ds = HECKTORMultitaskDataset(
-        data_list=val_items,
+    val_ds = CacheDataset(
+        data=val_items,
         transform=get_validation_transforms(config),
         cache_rate=config.cache_rate,
         num_workers=config.num_workers,
@@ -257,10 +232,11 @@ def get_feature_extraction_loaders(config) -> tuple:
     # Sous-DataFrame train pour les quantiles de bins temporels
     train_df = df[df["PatientID"].isin([it["case_id"] for it in train_items])].copy()
 
-    # Transforms de validation (déterministes) pour les deux splits
     tf = get_validation_transforms(config)
-    train_ds = HECKTORMultitaskDataset(train_items, tf, config.cache_rate, config.num_workers)
-    val_ds = HECKTORMultitaskDataset(val_items, tf, config.cache_rate, config.num_workers)
+    train_ds = CacheDataset(data=train_items, transform=tf,
+                            cache_rate=config.cache_rate, num_workers=config.num_workers)
+    val_ds = CacheDataset(data=val_items, transform=tf,
+                          cache_rate=config.cache_rate, num_workers=config.num_workers)
 
     # Loaders sans shuffle ni drop_last : on veut tous les patients, dans l'ordre
     train_loader = DataLoader(
