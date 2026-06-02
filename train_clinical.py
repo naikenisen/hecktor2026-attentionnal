@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import optuna
 import config
 from src.networks import ClinicalModel
 from src.clinical_data import ClinicalDataModule
@@ -10,11 +11,13 @@ from src.image_data import BottleneckExtractor
 from utils.losses import DeepHitDiscreteLoss, UncertaintyWeightedLoss
 from utils.metrics import balanced_accuracy, discrete_risk_from_surv_logits, c_index
 
+
 class ClinicalTrainer:
     """Entraîne la branche clinique sur les bottlenecks figés : boucle multitâche
-    (T, N, survie), validation périodique et sauvegarde du meilleur modèle."""
+    (T, N, survie), validation et pruning Optuna, sauvegarde du meilleur modèle."""
 
-    def __init__(self, config, device, data: ClinicalDataModule):
+    def __init__(self, config, device, data: ClinicalDataModule,
+                 lr: float, weight_decay: float, poly_power: float):
         self.config = config
         self.device = device
         self.data = data
@@ -32,12 +35,11 @@ class ClinicalTrainer:
         )
         self.trainable_parameters = list(self.model.parameters()) + list(self.weighting.parameters())
         self.optimizer = optim.AdamW(
-            self.trainable_parameters, lr=config.clinical_lr, weight_decay=config.weight_decay,
+            self.trainable_parameters, lr=lr, weight_decay=weight_decay,
         )
         self.scheduler = optim.lr_scheduler.PolynomialLR(
-            self.optimizer, total_iters=config.clinical_epochs, power=config.poly_lr_power,
+            self.optimizer, total_iters=config.clinical_epochs, power=poly_power,
         )
-        print(f"clinical heads have {sum(p.numel() for p in self.model.parameters()):,} parameters")
 
     def _batch_loss(self, batch: dict) -> torch.Tensor:
         out = self.model(batch["bottleneck"], batch["clinical"])
@@ -66,7 +68,7 @@ class ClinicalTrainer:
                 continue
             self.optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.trainable_parameters, self.config.grad_clip_norm)
+            torch.nn.utils.clip_grad_norm_(self.trainable_parameters, self.config.clinical_grad_clip_norm)
             self.optimizer.step()
             total_loss += loss.item()
             n_batches += 1
@@ -94,33 +96,61 @@ class ClinicalTrainer:
             "c_index": c_index(risks[observed], times[observed], events[observed]) if observed.any() else 0.5,
         }
 
-    def fit(self):
-        best_score = 0.0
+    def fit(self, trial, global_best) -> float:
+        trial_best_score = 0.0
         for epoch in range(self.config.clinical_epochs):
             train_loss = self.train_epoch()
-            print(f"epoch {epoch+1}/{self.config.clinical_epochs} loss {train_loss:.4f}")
-            if (epoch + 1) % 5 == 0 or (epoch + 1) == self.config.clinical_epochs:
-                metrics = self.evaluate()
-                print(f"validation balacc T {metrics['bal_t']:.4f} "
-                      f"balacc N {metrics['bal_n']:.4f} c-index {metrics['c_index']:.4f}")
-                score = (metrics["bal_t"] + metrics["bal_n"] + metrics["c_index"]) / 3
-                if score > best_score:
-                    best_score = score
-                    torch.save(self.model.state_dict(), self.config.best_clinical_path)
-                    print(f"saved new best clinical model (score {score:.4f}) to {self.config.best_clinical_path}")
+            metrics = self.evaluate()
+            score = (metrics["bal_t"] + metrics["bal_n"] + metrics["c_index"]) / 3
+            print(f"trial {trial.number} epoch {epoch+1} loss {train_loss:.4f} "
+                  f"balacc T {metrics['bal_t']:.4f} balacc N {metrics['bal_n']:.4f} "
+                  f"c-index {metrics['c_index']:.4f} score {score:.4f}")
+
+            if score > trial_best_score:
+                trial_best_score = score
+            if score > global_best["score"]:
+                global_best["score"] = score
+                torch.save(self.model.state_dict(), self.config.best_clinical_path)
+                print(f"saved new global best clinical model (score {score:.4f})")
+
+            trial.report(score, epoch)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
             self.scheduler.step()
-        print("clinical training complete")
+        return trial_best_score
+
+
+def objective(trial, device, data, global_best):
+    lr = trial.suggest_float("clinical_lr", 1e-5, 1e-2, log=True)
+    weight_decay = trial.suggest_float("clinical_weight_decay", 1e-6, 1e-3, log=True)
+    poly_power = trial.suggest_float("clinical_poly_lr_power", 0.5, 1.5)
+    trainer = ClinicalTrainer(config, device, data, lr, weight_decay, poly_power)
+    return trainer.fit(trial, global_best)
+
 
 def main():
     device = torch.device("cuda")
     print(f"using device {device} - {torch.cuda.get_device_name(device)}")
     for directory in (config.experiment_dir, config.checkpoint_dir):
         os.makedirs(directory, exist_ok=True)
+
     BottleneckExtractor(config, device).run()
     data = ClinicalDataModule(config).setup()
     config.n_clinical_features = data.clinical_dim
     print(f"clinical feature dimension is {data.clinical_dim}")
-    ClinicalTrainer(config, device, data).fit()
+
+    global_best = {"score": 0.0}
+    pruner = optuna.pruners.MedianPruner(n_warmup_steps=config.clinical_prune_warmup_epochs)
+    study = optuna.create_study(direction="maximize", pruner=pruner)
+    study.optimize(
+        lambda trial: objective(trial, device, data, global_best),
+        n_trials=config.clinical_n_trials,
+    )
+
+    print(f"best score {study.best_value:.4f}")
+    print(f"best params {study.best_params}")
+
 
 if __name__ == "__main__":
     main()

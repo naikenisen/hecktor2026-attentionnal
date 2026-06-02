@@ -17,15 +17,19 @@ hidden_tn = 256
 n_time_bins = 10
 surv_hidden = 256
 batch_size = 2
-learning_rate = 1e-4
-weight_decay = 1e-5
-num_epochs = 350
-n_warmup = 20
-grad_clip_norm = 1.0
-poly_lr_power = 0.9
+
+# Segmentation training
+seg_epochs = 350
+seg_grad_clip_norm = 1.0
+seg_n_trials = 30
+seg_prune_warmup_epochs = 10
+
+# Clinical training
 clinical_batch_size = 64
 clinical_epochs = 200
-clinical_lr = 1e-3
+clinical_grad_clip_norm = 1.0
+clinical_n_trials = 100
+clinical_prune_warmup_epochs = 20
 use_augmentation = True
 aug_probability = 0.5
 val_split = 0.2
