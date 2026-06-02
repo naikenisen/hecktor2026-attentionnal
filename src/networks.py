@@ -6,8 +6,8 @@ class SwinUNETRBackbone(nn.Module):
     """SwinUNETR de segmentation dont le forward expose aussi la carte de bottleneck
     profonde, réutilisée comme features figées par la branche clinique."""
 
-    def __init__(self, input_channels: int, num_classes: int, feature_size: int,
-                 use_checkpoint: bool, pretrained_path: str | None = None):
+    def __init__(self, input_channels, num_classes, feature_size,
+                 use_checkpoint, pretrained_path=None):
         super().__init__()
         self.swinunetr = SwinUNETR(
             in_channels=input_channels,

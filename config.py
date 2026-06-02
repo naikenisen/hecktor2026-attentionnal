@@ -19,7 +19,7 @@ surv_hidden = 256
 batch_size = 2
 
 # Segmentation training
-seg_epochs = 350
+seg_epochs = 300
 seg_grad_clip_norm = 1.0
 seg_n_trials = 30
 seg_prune_warmup_epochs = 10

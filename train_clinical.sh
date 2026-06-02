@@ -24,5 +24,7 @@ cd "$PROJECT_DIR"
 source "$VENV_DIR/bin/activate"
 module load python
 export PYTHONPATH="$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH"
+export MPLCONFIGDIR="$TMPDIR/matplotlib"
+mkdir -p "$MPLCONFIGDIR"
 
 python train_clinical.py
