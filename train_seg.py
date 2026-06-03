@@ -91,7 +91,8 @@ def objective(trial, train_loader, val_loader, device):
                 raise optuna.TrialPruned()
 
             scheduler.step()
-    except torch.cuda.OutOfMemoryError:
+    except torch.cuda.OutOfMemoryError as e:
+        print(f"trial {trial.number} OOM at epoch {epoch}: {e}")
         torch.cuda.empty_cache()
         raise optuna.TrialPruned()
 

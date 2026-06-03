@@ -7,7 +7,7 @@ num_t_classes = 4
 num_n_classes = 3
 spatial_size = (128, 128, 128)
 feature_size = 48
-use_checkpoint = False
+use_checkpoint = True
 pretrained_path = "utils/model_swinvit.pt"
 bottleneck_channels = 768
 d_model = 256
@@ -16,7 +16,7 @@ n_clinical_features = 22
 hidden_tn = 256
 n_time_bins = 10
 surv_hidden = 256
-batch_size = 4
+batch_size = 2
 
 # Segmentation training
 seg_search_epochs = 50          # epochs par trial pendant la HP search
