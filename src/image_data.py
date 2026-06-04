@@ -67,11 +67,23 @@ class PetCtTransforms:
 
     @staticmethod
     def validation(config) -> Compose:
+        # Crop central 128³ : conservé pour l'extraction de features (bottleneck figé de taille fixe)
         return Compose([
             LoadImaged(keys=VOLUME_KEYS, image_only=False, ensure_channel_first=False),
             EnsureChannelFirstd(keys=VOLUME_KEYS, channel_dim="no_channel"),
             CenterSpatialCropd(keys=VOLUME_KEYS, roi_size=config.spatial_size),
             SpatialPadd(keys=VOLUME_KEYS, spatial_size=config.spatial_size),
+            ConcatItemsd(keys=MODALITY_KEYS, name="image", dim=0),
+            SelectItemsd(keys=SAMPLE_KEYS),
+            EnsureTyped(keys=["image", "label"]),
+        ])
+
+    @staticmethod
+    def segmentation_validation(config) -> Compose:
+        # Volume entier passé tel quel : le sliding_window_inference se charge du pavage en 128³
+        return Compose([
+            LoadImaged(keys=VOLUME_KEYS, image_only=False, ensure_channel_first=False),
+            EnsureChannelFirstd(keys=VOLUME_KEYS, channel_dim="no_channel"),
             ConcatItemsd(keys=MODALITY_KEYS, name="image", dim=0),
             SelectItemsd(keys=SAMPLE_KEYS),
             EnsureTyped(keys=["image", "label"]),
@@ -112,22 +124,24 @@ class PetCtDataModule:
             })
         return records
 
-    def _build_loader(self, case_ids: list, transforms: Compose, *, shuffle: bool, drop_last: bool) -> DataLoader:
+    def _build_loader(self, case_ids: list, transforms: Compose, *, shuffle: bool,
+                      drop_last: bool, batch_size: int = None) -> DataLoader:
         dataset = CacheDataset(
             data=self._build_records(case_ids), transform=transforms,
             cache_rate=self.config.cache_rate, num_workers=self.config.num_workers,
         )
         return DataLoader(
-            dataset, batch_size=self.config.batch_size, shuffle=shuffle, drop_last=drop_last,
-            num_workers=self.config.num_workers, pin_memory=True,
+            dataset, batch_size=batch_size or self.config.batch_size, shuffle=shuffle,
+            drop_last=drop_last, num_workers=self.config.num_workers, pin_memory=True,
             persistent_workers=self.config.num_workers > 0,
         )
 
     def segmentation_loaders(self) -> tuple:
         train_loader = self._build_loader(self.train_ids, PetCtTransforms.train(self.config),
                                     shuffle=True, drop_last=True)
-        val_loader = self._build_loader(self.val_ids, PetCtTransforms.validation(self.config),
-                                  shuffle=False, drop_last=False)
+        # Val sur volume entier : batch_size=1 (tailles variables possibles) + sliding window
+        val_loader = self._build_loader(self.val_ids, PetCtTransforms.segmentation_validation(self.config),
+                                  shuffle=False, drop_last=False, batch_size=1)
         return train_loader, val_loader
 
     def extraction_loaders(self) -> tuple:

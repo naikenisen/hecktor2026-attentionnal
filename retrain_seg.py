@@ -12,6 +12,7 @@ from utils.losses import seg_loss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
 from monai.data import decollate_batch
+from monai.inferers import sliding_window_inference
 
 
 def train_one_epoch(model, loader, optimizer, scaler, device):
@@ -38,20 +39,23 @@ def train_one_epoch(model, loader, optimizer, scaler, device):
 @torch.no_grad()
 def validate(model, loader, device):
     model.eval()
-    dice_metric = DiceMetric(include_background=False, reduction="mean")
+    dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
     post_label = AsDiscrete(to_onehot=config.num_seg_classes)
     post_pred = AsDiscrete(argmax=True, to_onehot=config.num_seg_classes)
     for batch in tqdm(loader, desc="Val", leave=False):
         ct_pet = batch["image"].to(device)
         seg_gt = batch["label"].to(device)
         with autocast():
-            seg_logits, _ = model(ct_pet)
+            seg_logits = sliding_window_inference(
+                ct_pet, roi_size=config.spatial_size, sw_batch_size=config.batch_size,
+                predictor=lambda x: model(x)[0], overlap=0.5, mode="gaussian",
+            )
         gt = [post_label(x) for x in decollate_batch(seg_gt)]
         pr = [post_pred(x) for x in decollate_batch(seg_logits)]
         dice_metric(y_pred=pr, y=gt)
-    dice = dice_metric.aggregate().item()
+    per_class = dice_metric.aggregate()        # un Dice par classe foreground (GTVp, GTVn)
     dice_metric.reset()
-    return dice
+    return torch.nanmean(per_class).item(), per_class.tolist()
 
 
 def main():
@@ -84,8 +88,9 @@ def main():
     best_dice = 0.0
     for epoch in range(config.seg_final_epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, scaler, device)
-        dice = validate(model, val_loader, device)
-        print(f"epoch {epoch+1}/{config.seg_final_epochs} loss {train_loss:.4f} dice {dice:.4f}")
+        dice, per_class = validate(model, val_loader, device)
+        pc = "/".join(f"{d:.4f}" for d in per_class)
+        print(f"epoch {epoch+1}/{config.seg_final_epochs} loss {train_loss:.4f} dice {dice:.4f} (GTVp/GTVn {pc})")
         if dice > best_dice:
             best_dice = dice
             torch.save(model.state_dict(), config.best_seg_path)
