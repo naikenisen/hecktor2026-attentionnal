@@ -193,7 +193,7 @@ def process_patient(args):
 
 def main() -> None:
     input_dir  = Path("/work/imvia/in156281/datasets/hecktor_dataset")
-    output_dir = Path("/work/imvia/in156281/datasets/hecktor_dataset_preprocessed")
+    output_dir = Path("/work/imvia/in156281/datasets/hecktor_dataset_preprocessed_suv")
     max_workers = max(1, multiprocessing.cpu_count() // 2)
     n_workers   = max_workers
 
