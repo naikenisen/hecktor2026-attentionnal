@@ -20,6 +20,7 @@ from monai.transforms import (
     Activationsd,
 )
 from monai.data import MetaTensor
+from convert_nifti_Bq_SUV import bq_to_suv
 
 def sitk_to_metatensor(img_sitk: sitk.Image) -> MetaTensor:
     arr = sitk.GetArrayFromImage(img_sitk).astype(np.float32)
@@ -195,6 +196,14 @@ def main() -> None:
     output_dir = Path("/work/imvia/in156281/datasets/hecktor_dataset_preprocessed")
     max_workers = max(1, multiprocessing.cpu_count() // 2)
     n_workers   = max_workers
+
+    #Bq to SUV conversion (if needed)
+    bq_to_suv(
+        input_root=str(input_dir),
+        headers_csv= r"suv_conversion_tags.csv",
+        output_root=str(input_dir),)
+    #End of Bq to SUV conversion
+    
     patient_dirs = sorted(d for d in input_dir.iterdir() if d.is_dir())
     print(f"{len(patient_dirs)} patients trouves dans {input_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -249,5 +258,7 @@ def main() -> None:
         print(f"{len(errors)} erreur(s) :")
         for pid, exc in errors:
             print(f"  {pid}: {exc}")
+
+
 if __name__ == "__main__":
     main()
