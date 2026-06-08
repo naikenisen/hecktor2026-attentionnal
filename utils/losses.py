@@ -7,6 +7,7 @@ seg_loss = DiceFocalLoss(
     softmax=True,
     include_background=False,
     reduction="mean",
+    batch=True,  # agrège le terme Dice sur le batch : stabilise les structures petites/éparses
 )
 t_loss = nn.CrossEntropyLoss(ignore_index=-1)
 n_loss = nn.CrossEntropyLoss(ignore_index=-1)

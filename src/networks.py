@@ -3,7 +3,7 @@ import torch.nn as nn
 from monai.networks.nets import SwinUNETR
 
 class SwinUNETRBackbone(nn.Module):
-    """SwinUNETR de segmentation dont le forward expose aussi la carte de bottleneck
+    """SwinUNETR-V2 de segmentation dont le forward expose aussi la carte de bottleneck
     profonde, réutilisée comme features figées par la branche clinique."""
 
     def __init__(self, input_channels, num_classes, feature_size,
@@ -14,6 +14,7 @@ class SwinUNETRBackbone(nn.Module):
             out_channels=num_classes,
             feature_size=feature_size,
             use_checkpoint=use_checkpoint,
+            use_v2=True,  # variante SwinUNETR-V2 : blocs conv résiduels en tête de chaque étage
         )
         weights = torch.load(pretrained_path, map_location="cpu", weights_only=False)
         self.swinunetr.load_from(weights=weights)
