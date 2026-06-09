@@ -7,7 +7,7 @@ import optuna
 from sksurv.ensemble import RandomSurvivalForest
 
 import config
-from utils.metrics import c_index
+from src.metrics import c_index
 
 
 def _build_rsf(params: dict) -> RandomSurvivalForest:

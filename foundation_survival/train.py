@@ -8,7 +8,7 @@ Lancement (depuis la racine du dépôt) :
 Contrairement à `survival` (variables cliniques) et `tn` (embedding TEP/CT de la segmentation),
 cette tête n'utilise QUE la CT, encodée par le modèle de fondation CT-FM. Le split train/val
 réutilise exactement celui de la pipeline image (`split_case_ids`). La forêt et la recherche
-Optuna (c-index) sont mutualisées dans `utils.survival_forest`.
+Optuna (c-index) sont mutualisées dans `src.survival_forest`.
 """
 import os
 import joblib
@@ -17,7 +17,7 @@ from sksurv.util import Surv
 import config
 from foundation_survival.extractor import ensure_ct_fm_features
 from foundation_survival.dataset import load_foundation_survival
-from utils.survival_forest import search_rsf
+from src.survival_forest import search_rsf
 
 
 def main():

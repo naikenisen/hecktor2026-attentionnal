@@ -8,7 +8,7 @@ Aucune information image : la forêt de survie est entraînée uniquement sur le
 tabulaires du CSV (âge standardisé + one-hot : genre, tabac, alcool, performance status,
 statut HPV, traitement). T-stage / N-stage sont exclus (ce sont les cibles de `tn`,
 indisponibles à l'inférence). Cible : la paire (événement, RFS). La forêt et la recherche
-Optuna (c-index) sont mutualisées dans `utils.survival_forest`.
+Optuna (c-index) sont mutualisées dans `src.survival_forest`.
 """
 import os
 import joblib
@@ -16,7 +16,7 @@ from sksurv.util import Surv
 
 import config
 from src.clinical_data import load_clinical_survival
-from utils.survival_forest import search_rsf
+from src.survival_forest import search_rsf
 
 
 def main():

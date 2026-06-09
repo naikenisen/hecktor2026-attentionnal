@@ -120,8 +120,9 @@ python -m foundation_survival.train       # extraction CT-FM (cache) + RandomSur
 
 ## Repository structure
 
-Le code est séparé en un paquet par tâche (`seg`, `tn`, `survival`, `foundation_survival`).
-Les `.sh` de soumission restent à la racine. `src/` et `utils/` regroupent le code partagé.
+Le code est séparé en un paquet par tâche (`seg`, `tn`, `survival`, `foundation_survival`),
+plus `preprocessing/` (prépa des données, scripts autonomes). Les `.sh` de soumission restent
+à la racine. `src/` regroupe le code partagé (données, métriques, forêt de survie).
 
 ```
 hecktor2026/
@@ -144,14 +145,16 @@ hecktor2026/
 │   ├── dataset.py               #   alignement embedding ↔ cible de survie
 │   └── train.py                 #   point d'entrée  →  python -m foundation_survival.train
 │
-├── src/
-│   ├── image_data.py            # split patients + NNUNetBottleneckExtractor + ensure_bottlenecks
-│   └── clinical_data.py         # embedding (T/N) + encodeur clinique & survie (RFS)
+├── preprocessing/               # Prépa des données (scripts autonomes, hors pipeline d'entraînement)
+│   ├── convert_nifti_Bq_SUV.py  #   conversion TEP BQML → SUVbw (bq_to_suv)
+│   └── preprocess.py            #   resampling / recadrage / normalisation → python preprocessing/preprocess.py
 │
-├── utils/
-│   ├── metrics.py               # balanced_accuracy, c_index
-│   └── survival_forest.py       # RandomSurvivalForest + Optuna, partagé survival/foundation
+├── src/                         # Code partagé
+│   ├── image_data.py            #   split patients + NNUNetBottleneckExtractor + ensure_bottlenecks
+│   ├── clinical_data.py         #   embedding (T/N) + encodeur clinique & survie (RFS)
+│   ├── metrics.py               #   balanced_accuracy, c_index
+│   └── survival_forest.py       #   RandomSurvivalForest + Optuna, partagé survival/foundation
 │
-├── train_seg.sh / train_tn.sh / train_survival.sh / train_foundation_survival.sh
+├── train_seg.sh / train_tn.sh / train_survival.sh / train_foundation_survival.sh / preprocess.sh
 └── config.py                    # réglages nnU-Net, split, chemins, n_trials des forêts
 ```

@@ -6,7 +6,7 @@ import optuna
 from sklearn.ensemble import RandomForestClassifier
 
 import config
-from utils.metrics import balanced_accuracy
+from src.metrics import balanced_accuracy
 
 
 def _build_rf(params: dict) -> RandomForestClassifier:
