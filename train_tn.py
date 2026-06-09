@@ -40,7 +40,10 @@ def train_rf(field: str, train, val, n_trials: int, save_path: str) -> float:
         clf.fit(X_train, y_train)
         return balanced_accuracy(y_val, clf.predict(X_val))
 
-    study = optuna.create_study(direction="maximize")
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=config.rf_seed),
+    )
     study.optimize(objective, n_trials=n_trials)
 
     best = _build_rf(study.best_params)

@@ -1,3 +1,5 @@
+import os
+import random
 import numpy as np
 import pandas as pd
 import torch
@@ -16,6 +18,20 @@ def _stage_index(value, stages: list) -> int:
     return stages.index(label) if label in stages else UNKNOWN_STAGE
 
 
+def split_case_ids(config) -> tuple[list, list]:
+    """Split train/val déterministe des patients présents dans data_root (CPU seul,
+    sans MONAI). Source unique du découpage, partagée par la pipeline image (extraction
+    des embeddings) et la survie clinique : garantit des splits strictement identiques."""
+    case_ids = sorted(
+        d for d in os.listdir(config.data_root)
+        if os.path.isdir(os.path.join(config.data_root, d))
+    )
+    random.seed(config.seed)
+    random.shuffle(case_ids)
+    n_val = int(len(case_ids) * config.val_split)
+    return case_ids[n_val:], case_ids[:n_val]
+
+
 def pool_embedding(bottleneck: torch.Tensor) -> np.ndarray:
     """Réduit le bottleneck spatial (N, C, D, H, W) en un vecteur par patient.
     On concatène moyenne globale (contexte) et maximum global (pic d'activation,
@@ -26,33 +42,27 @@ def pool_embedding(bottleneck: torch.Tensor) -> np.ndarray:
 
 
 class EmbeddingDataset:
-    """Embedding TEP/CT figé d'un split, aligné par case_id avec ses cibles tabulaires
-    (stades T/N, temps et événement de survie). Aucune donnée clinique fusionnée."""
+    """Embedding TEP/CT figé d'un split, aligné par case_id avec ses cibles de stade T/N.
+    Alimente les RandomForest de train_tn.py (la survie passe par les données cliniques)."""
 
     def __init__(self, features: dict, patients: pd.DataFrame):
         rows = patients.set_index("PatientID")
         case_ids = list(features["case_id"])
         embeddings = pool_embedding(features["bottleneck"])
 
-        keep, t, n, time, event = [], [], [], [], []
+        keep, t, n = [], [], []
         for i, case_id in enumerate(case_ids):
             if case_id not in rows.index:
                 continue
-            row = rows.loc[case_id]
             keep.append(i)
+            row = rows.loc[case_id]
             t.append(_stage_index(row.get("T-stage"), T_STAGES))
             n.append(_stage_index(row.get("N-stage"), N_STAGES))
-            relapse_free_survival = row.get("RFS", np.nan)
-            time.append(float(relapse_free_survival) if not pd.isna(relapse_free_survival) else 0.0)
-            relapse = row.get("Relapse", np.nan)
-            event.append(int(relapse) if not pd.isna(relapse) else 0)
 
         self.case_ids = [case_ids[i] for i in keep]
         self.X = embeddings[keep]
         self.t_label = np.array(t, dtype=np.int64)
         self.n_label = np.array(n, dtype=np.int64)
-        self.time = np.array(time, dtype=np.float64)
-        self.event = np.array(event, dtype=np.int64)
 
     def __len__(self) -> int:
         return self.X.shape[0]
@@ -62,11 +72,6 @@ class EmbeddingDataset:
         y = getattr(self, field)
         mask = y >= 0
         return self.X[mask], y[mask]
-
-    def survival(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Sous-ensemble (X, time, event) des patients dont le RFS est renseigné (> 0)."""
-        mask = self.time > 0
-        return self.X[mask], self.time[mask], self.event[mask].astype(bool)
 
 
 def load_embeddings(config) -> tuple[EmbeddingDataset, EmbeddingDataset]:
@@ -173,16 +178,15 @@ class ClinicalSurvivalDataset:
 
 
 def load_clinical_survival(config) -> tuple[ClinicalSurvivalDataset, ClinicalSurvivalDataset]:
-    """Construit les jeux de survie cliniques train/val. Le split réutilise exactement
-    celui de la pipeline image (PetCtDataModule, CPU seul) pour rester cohérent avec
-    train_tn, mais aucune image n'est chargée ici. L'encodeur est ajusté sur le train."""
-    from src.image_data import PetCtDataModule  # source unique du split, sans extraction GPU
-    splitter = PetCtDataModule(config)
+    """Construit les jeux de survie cliniques train/val. Le split (split_case_ids) est
+    identique à celui de la pipeline image, pour rester cohérent avec train_tn, mais
+    aucune image — ni MONAI — n'est chargée ici. L'encodeur est ajusté sur le train."""
+    train_ids, val_ids = split_case_ids(config)
     patients = pd.read_csv(config.csv_path)
-    train_patients = patients[patients["PatientID"].isin(splitter.train_ids)]
+    train_patients = patients[patients["PatientID"].isin(train_ids)]
     encoder = ClinicalEncoder().fit(train_patients)
-    train = ClinicalSurvivalDataset(splitter.train_ids, patients, encoder)
-    val = ClinicalSurvivalDataset(splitter.val_ids, patients, encoder)
+    train = ClinicalSurvivalDataset(train_ids, patients, encoder)
+    val = ClinicalSurvivalDataset(val_ids, patients, encoder)
     print(f"loaded clinical features (dim {encoder.output_dim}): "
           f"{len(train)} train / {len(val)} val patients")
     return train, val

@@ -46,7 +46,10 @@ def main():
         # c_index attend un score de risque et applique lui-même la négation.
         return c_index(rsf.predict(X_val), t_val, e_val.astype(float))
 
-    study = optuna.create_study(direction="maximize")
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=config.rf_seed),
+    )
     study.optimize(objective, n_trials=config.surv_n_trials)
 
     best = _build_rsf(study.best_params)

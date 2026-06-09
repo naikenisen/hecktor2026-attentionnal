@@ -85,7 +85,24 @@ experiments/<exp>/features/{train,val}.pt (déterministe, réutilisé ensuite).
 python train_seg.py        # phase 1 : recherche HP segmentation
 python retrain_seg.py      # phase 1 : retrain final, sauvegarde best_model.pth
 python train_tn.py         # phase 2 : extraction auto des embeddings + RandomForest T/N
-python train_survival.py   # phase 2 : RandomSurvivalForest (réutilise les embeddings)
+python train_survival.py   # phase 2 : RandomSurvivalForest sur données cliniques (CSV)
+```
+
+### Variante survie — embedding CT du modèle de fondation CT-FM (`train_foundation_survival.py`)
+
+Approche indépendante des phases ci-dessus : la survie est prédite uniquement à partir
+de la **CT**, encodée par le modèle de fondation **CT-FM**
+([project-lighter/ct_fm_feature_extractor](https://huggingface.co/project-lighter/ct_fm_feature_extractor)),
+un SegResNet pré-entraîné en self-supervised contrastif sur 148 000 scanners (Imaging
+Data Commons). Pour chaque patient on extrait un vecteur figé de **512** caractéristiques
+(global average pooling du dernier feature map), puis on entraîne un `RandomSurvivalForest`
+sur la cible `(événement, RFS)`. Le split train/val et la recherche Optuna (c-index)
+restent ceux des autres têtes. L'extraction (GPU) est mise en cache dans
+`experiments/<exp>/features/ct_fm_{train,val}.pt` et réutilisée ensuite.
+
+```bash
+pip install lighter_zoo               # dépendance du modèle de fondation
+python train_foundation_survival.py   # extraction CT-FM (cache) + RandomSurvivalForest
 ```
 
 ---
@@ -98,7 +115,8 @@ hecktor2026/
 ├── train_seg.py                 # Phase 1 : recherche HP segmentation (Optuna)
 ├── retrain_seg.py               # Phase 1 : retrain final → best_model.pth
 ├── train_tn.py                  # Phase 2 : RandomForest T et N sur embedding figé
-├── train_survival.py            # Phase 2 : RandomSurvivalForest sur embedding figé
+├── train_survival.py            # Phase 2 : RandomSurvivalForest sur données cliniques
+├── train_foundation_survival.py # Variante : RandomSurvivalForest sur embedding CT-FM (CT seule)
 │
 ├── src/
 │   ├── image_data.py            # DataModule seg + BottleneckExtractor + ensure_bottlenecks

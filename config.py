@@ -3,13 +3,10 @@ data_root = "/work/imvia/in156281/datasets/hecktor_dataset_preprocessed_suv"
 csv_path = "/work/imvia/in156281/datasets/hecktor_dataset/HECKTOR_2026_training_data.csv"
 input_channels = 2
 num_seg_classes = 3
-num_t_classes = 4
-num_n_classes = 4   # N0, N1, N2, N3 (cf. N_STAGES dans clinical_data.py)
 spatial_size = (128, 128, 128)
 feature_size = 48
 use_checkpoint = True
 pretrained_path = "utils/model_swinvit.pt"
-bottleneck_channels = 768   # canaux du bottleneck SwinUNETR (dim de l'embedding avant pooling)
 batch_size = 2
 
 # Segmentation training
@@ -40,3 +37,9 @@ best_tn_n_path = os.path.join(checkpoint_dir, "tn_n_rf.joblib")
 best_survival_path = os.path.join(checkpoint_dir, "survival_rsf.joblib")
 train_features_path = os.path.join(features_dir, "train.pt")
 val_features_path = os.path.join(features_dir, "val.pt")
+
+# Survie sur embedding CT du modèle de fondation CT-FM (SegResNet SSL, 512-D, CT seule)
+foundation_model_id = "project-lighter/ct_fm_feature_extractor"
+foundation_train_features_path = os.path.join(features_dir, "ct_fm_train.pt")
+foundation_val_features_path = os.path.join(features_dir, "ct_fm_val.pt")
+best_foundation_survival_path = os.path.join(checkpoint_dir, "survival_ct_fm_rsf.joblib")

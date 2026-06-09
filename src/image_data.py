@@ -1,5 +1,4 @@
 import os
-import random
 import torch
 import pandas as pd
 
@@ -26,6 +25,7 @@ from monai.transforms import (
     SelectItemsd,
 )
 from src.networks import SwinUNETRBackbone
+from src.clinical_data import split_case_ids
 
 VOLUME_KEYS = ["ct", "pet", "label"]
 MODALITY_KEYS = ["ct", "pet"]
@@ -104,14 +104,7 @@ class PetCtDataModule:
         self.train_ids, self.val_ids = self._split_case_ids()
 
     def _split_case_ids(self) -> tuple:
-        case_ids = sorted(
-            d for d in os.listdir(self.config.data_root)
-            if os.path.isdir(os.path.join(self.config.data_root, d))
-        )
-        random.seed(self.config.seed)
-        random.shuffle(case_ids)
-        n_val = int(len(case_ids) * self.config.val_split)
-        train_ids, val_ids = case_ids[n_val:], case_ids[:n_val]
+        train_ids, val_ids = split_case_ids(self.config)
         print(f"{len(train_ids)} train / {len(val_ids)} val")
         return train_ids, val_ids
 
