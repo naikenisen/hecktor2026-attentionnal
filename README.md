@@ -122,7 +122,7 @@ python -m foundation_survival.train       # extraction CT-FM (cache) + RandomSur
 
 Le code est séparé en un paquet par tâche (`seg`, `tn`, `survival`, `foundation_survival`),
 plus `preprocessing/` (prépa des données, scripts autonomes). Les `.sh` de soumission restent
-à la racine. `src/` regroupe le code partagé (données, métriques, forêt de survie).
+à la racine. `src/` regroupe le code partagé entre têtes (split, métriques, forêt de survie).
 
 ```
 hecktor2026/
@@ -134,10 +134,13 @@ hecktor2026/
 │   └── train.py                 #   point d'entrée  →  python -m seg.train
 │
 ├── tn/                          # Phase 2 — stades T et N (RandomForest sur embedding figé)
+│   ├── extractor.py             #   PetCtDataModule + NNUNetBottleneckExtractor + ensure_bottlenecks
+│   ├── dataset.py               #   pool_embedding + EmbeddingDataset (embedding ↔ cibles T/N)
 │   ├── forest.py                #   RandomForestClassifier + recherche Optuna (balanced acc)
 │   └── train.py                 #   point d'entrée  →  python -m tn.train
 │
 ├── survival/                    # Phase 2 — survie RFS (RandomSurvivalForest, données cliniques)
+│   ├── dataset.py               #   ClinicalEncoder + ClinicalSurvivalDataset (variables cliniques)
 │   └── train.py                 #   point d'entrée  →  python -m survival.train
 │
 ├── foundation_survival/         # Variante — survie RFS sur embedding CT-FM (CT seule)
@@ -149,9 +152,8 @@ hecktor2026/
 │   ├── convert_nifti_Bq_SUV.py  #   conversion TEP BQML → SUVbw (bq_to_suv)
 │   └── preprocess.py            #   resampling / recadrage / normalisation → python preprocessing/preprocess.py
 │
-├── src/                         # Code partagé
-│   ├── image_data.py            #   split patients + NNUNetBottleneckExtractor + ensure_bottlenecks
-│   ├── clinical_data.py         #   embedding (T/N) + encodeur clinique & survie (RFS)
+├── src/                         # Code partagé entre plusieurs têtes
+│   ├── split.py                 #   split_case_ids — split train/val déterministe (toutes les têtes)
 │   ├── metrics.py               #   balanced_accuracy, c_index
 │   └── survival_forest.py       #   RandomSurvivalForest + Optuna, partagé survival/foundation
 │

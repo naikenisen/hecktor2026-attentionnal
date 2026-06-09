@@ -1,10 +1,17 @@
+"""Extraction des embeddings TEP/CT pour les stades T/N.
+
+Recharge le modèle nnU-Net entraîné (phase 1), GÈLE son encodeur, et sauvegarde le
+bottleneck spatial profond de chaque patient (carte du dernier étage d'encodage) vers
+`features/{train,val}.pt`. C'est la passerelle entre la segmentation et les forêts T/N :
+seul `tn` consomme ces embeddings.
+"""
 import os
 import torch
 import pandas as pd
 from tqdm import tqdm
 from torch.cuda.amp import autocast
 from monai.transforms import ResizeWithPadOrCrop
-from src.clinical_data import split_case_ids
+from src.split import split_case_ids
 
 
 class PetCtDataModule:
@@ -41,12 +48,11 @@ class NNUNetBottleneckExtractor:
     bottleneck spatial profond de chaque patient (carte du dernier étage d'encodage),
     indexé par case_id, pour les deux splits.
 
-    Remplace l'extraction SwinUNETR. Chaque cas est prétraité par nnU-Net lui-même
-    (resampling à l'espacement cible + normalisation par canal, identiques à
-    l'entraînement) puis recadré au patch fixe du plan : le bottleneck a donc une taille
-    spatiale fixe, empilable. Le format de sortie est inchangé
-    (`{"bottleneck": (N, C, D, H, W), "case_id": [...]}`), consommé tel quel par
-    `pool_embedding` et les forêts T/N."""
+    Chaque cas est prétraité par nnU-Net lui-même (resampling à l'espacement cible +
+    normalisation par canal, identiques à l'entraînement) puis recadré au patch fixe du
+    plan : le bottleneck a donc une taille spatiale fixe, empilable. Le format de sortie
+    (`{"bottleneck": (N, C, D, H, W), "case_id": [...]}`) est consommé tel quel par
+    `tn.dataset.pool_embedding` et les forêts T/N."""
 
     def __init__(self, config, device):
         self.config = config

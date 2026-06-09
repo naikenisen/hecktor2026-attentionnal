@@ -75,7 +75,7 @@ def ensure_ct_fm_features(config):
             and os.path.exists(config.foundation_val_features_path)):
         print("CT-FM features already extracted, skipping")
         return
-    from src.clinical_data import split_case_ids  # source unique du split (CPU seul, sans MONAI)
+    from src.split import split_case_ids  # source unique du split (CPU seul, sans MONAI)
     train_ids, val_ids = split_case_ids(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     extractor = CtFmExtractor(config, device)

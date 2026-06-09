@@ -14,7 +14,7 @@ fige le split du projet en fold 0 → entraîne 3d_fullres → reporte le Dice d
 import os
 import pandas as pd
 import config
-from src.clinical_data import split_case_ids
+from src.split import split_case_ids
 from seg.dataset import build_records, prepare_raw_dataset, write_project_split
 from seg.runner import build_runner, plan_and_process, train_fold, report_validation
 

@@ -15,7 +15,7 @@ import joblib
 from sksurv.util import Surv
 
 import config
-from src.clinical_data import load_clinical_survival
+from survival.dataset import load_clinical_survival
 from src.survival_forest import search_rsf
 
 

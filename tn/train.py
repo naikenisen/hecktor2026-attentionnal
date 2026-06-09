@@ -10,8 +10,8 @@ est entraîné pour T et pour N, avec recherche Optuna sur le split de validatio
 """
 import os
 import config
-from src.image_data import ensure_bottlenecks
-from src.clinical_data import load_embeddings
+from tn.extractor import ensure_bottlenecks
+from tn.dataset import load_embeddings
 from tn.forest import train_rf
 
 
