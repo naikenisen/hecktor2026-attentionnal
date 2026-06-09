@@ -1,11 +1,10 @@
 #!/bin/ksh
 #$ -q gpu
-#$ -o train_seg.$TASK_ID.out
+#$ -o train_seg.out
 #$ -j y
 #$ -N train_seg
-#$ -t 1-4
-#$ -tc 4
 
+# nnU-Net auto-configurant : un seul entraînement (plus de HP search parallèle).
 set -e
 
 # Modify these variables to adapt the sh script to your ccub accout and workgroup
@@ -29,5 +28,5 @@ export PYTHONPATH="$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH"
 export MPLCONFIGDIR="$TMPDIR/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
-# Phase 1 : segmentation (entraîne le backbone puis extrait les bottlenecks)
+# Phase 1 : segmentation nnU-Net (conversion + plan_and_process + entraînement fold 0)
 python train_seg.py

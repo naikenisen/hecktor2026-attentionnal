@@ -1,5 +1,6 @@
 torch
 monai
+nnunetv2
 nibabel
 SimpleITK
 scikit-image

@@ -1,102 +1,15 @@
 import os
 import torch
 import pandas as pd
-
-# Les workers du DataLoader partagent les tensors via des file descriptors par défaut ;
-# sur de gros volumes bimodaux on épuise vite `ulimit -n` (RuntimeError: received 0 items
-# of ancdata). On bascule sur le partage par mémoire partagée (/dev/shm).
-torch.multiprocessing.set_sharing_strategy("file_system")
 from tqdm import tqdm
-from monai.data import CacheDataset, DataLoader
-from monai.transforms import (
-    Compose,
-    LoadImaged,
-    EnsureChannelFirstd,
-    CenterSpatialCropd,
-    SpatialPadd,
-    RandFlipd,
-    RandScaleIntensityd,
-    RandShiftIntensityd,
-    RandGaussianNoised,
-    RandGaussianSmoothd,
-    EnsureTyped,
-    RandCropByLabelClassesd,
-    ConcatItemsd,
-    SelectItemsd,
-)
-from src.networks import SwinUNETRBackbone
+from torch.cuda.amp import autocast
+from monai.transforms import ResizeWithPadOrCrop
 from src.clinical_data import split_case_ids
 
-VOLUME_KEYS = ["ct", "pet", "label"]
-MODALITY_KEYS = ["ct", "pet"]
-SAMPLE_KEYS = ["image", "label", "case_id"]
-
-class PetCtTransforms:
-    """Fabrique les pipelines MONAI qui chargent CT+PET+masque et les fusionnent en
-    volume bimodal : augmenté à l'entraînement, déterministe en validation."""
-
-    @staticmethod
-    def train(config) -> Compose:
-        steps = [
-            LoadImaged(keys=VOLUME_KEYS, image_only=False, ensure_channel_first=False),
-            EnsureChannelFirstd(keys=VOLUME_KEYS, channel_dim="no_channel"),
-            RandCropByLabelClassesd(
-                keys=VOLUME_KEYS,
-                label_key="label",
-                spatial_size=config.spatial_size,
-                ratios=[0.1, 0.45, 0.45],
-                num_classes=3,
-                num_samples=1,
-                allow_missing_keys=True,
-                warn=False,
-            ),
-        ]
-        if config.use_augmentation:
-            steps.extend([
-                RandFlipd(keys=VOLUME_KEYS, spatial_axis=[0, 1, 2], prob=config.aug_probability),
-                RandScaleIntensityd(keys=["ct"], factors=0.1, prob=config.aug_probability),
-                RandShiftIntensityd(keys=["ct"], offsets=0.1, prob=config.aug_probability),
-                RandGaussianNoised(keys=["ct"], std=0.01, prob=config.aug_probability),
-                RandGaussianSmoothd(
-                    keys=["ct"],
-                    sigma_x=(0.5, 1.15), sigma_y=(0.5, 1.15), sigma_z=(0.5, 1.15),
-                    prob=config.aug_probability,
-                ),
-            ])
-        steps.extend([
-            ConcatItemsd(keys=MODALITY_KEYS, name="image", dim=0),
-            SelectItemsd(keys=SAMPLE_KEYS),
-            EnsureTyped(keys=["image", "label"]),
-        ])
-        return Compose(steps)
-
-    @staticmethod
-    def validation(config) -> Compose:
-        # Crop central 128³ : conservé pour l'extraction de features (bottleneck figé de taille fixe)
-        return Compose([
-            LoadImaged(keys=VOLUME_KEYS, image_only=False, ensure_channel_first=False),
-            EnsureChannelFirstd(keys=VOLUME_KEYS, channel_dim="no_channel"),
-            CenterSpatialCropd(keys=VOLUME_KEYS, roi_size=config.spatial_size),
-            SpatialPadd(keys=VOLUME_KEYS, spatial_size=config.spatial_size),
-            ConcatItemsd(keys=MODALITY_KEYS, name="image", dim=0),
-            SelectItemsd(keys=SAMPLE_KEYS),
-            EnsureTyped(keys=["image", "label"]),
-        ])
-
-    @staticmethod
-    def segmentation_validation(config) -> Compose:
-        # Volume entier passé tel quel : le sliding_window_inference se charge du pavage en 128³
-        return Compose([
-            LoadImaged(keys=VOLUME_KEYS, image_only=False, ensure_channel_first=False),
-            EnsureChannelFirstd(keys=VOLUME_KEYS, channel_dim="no_channel"),
-            ConcatItemsd(keys=MODALITY_KEYS, name="image", dim=0),
-            SelectItemsd(keys=SAMPLE_KEYS),
-            EnsureTyped(keys=["image", "label"]),
-        ])
 
 class PetCtDataModule:
-    """Partitionne les patients en train/val et construit les DataLoaders cachés, aussi
-    bien pour l'entraînement de la segmentation que pour l'extraction des features."""
+    """Partitionne les patients en train/val (split déterministe partagé avec le reste de
+    la pipeline) et expose les chemins CT/PET/masque de chaque cas."""
 
     def __init__(self, config):
         self.config = config
@@ -122,83 +35,85 @@ class PetCtDataModule:
             })
         return records
 
-    def _build_loader(self, case_ids: list, transforms: Compose, *, shuffle: bool,
-                      drop_last: bool, batch_size: int = None) -> DataLoader:
-        dataset = CacheDataset(
-            data=self._build_records(case_ids), transform=transforms,
-            cache_rate=self.config.cache_rate, num_workers=self.config.num_workers,
-        )
-        return DataLoader(
-            dataset, batch_size=batch_size or self.config.batch_size, shuffle=shuffle,
-            drop_last=drop_last, num_workers=self.config.num_workers, pin_memory=True,
-            persistent_workers=self.config.num_workers > 0,
-        )
 
-    def segmentation_loaders(self) -> tuple:
-        train_loader = self._build_loader(self.train_ids, PetCtTransforms.train(self.config),
-                                    shuffle=True, drop_last=True)
-        # Val sur volume entier : batch_size=1 (tailles variables possibles) + sliding window
-        val_loader = self._build_loader(self.val_ids, PetCtTransforms.segmentation_validation(self.config),
-                                  shuffle=False, drop_last=False, batch_size=1)
-        return train_loader, val_loader
+class NNUNetBottleneckExtractor:
+    """Recharge le modèle nnU-Net entraîné (phase 1), GÈLE son encodeur, et sauvegarde le
+    bottleneck spatial profond de chaque patient (carte du dernier étage d'encodage),
+    indexé par case_id, pour les deux splits.
 
-    def extraction_loaders(self) -> tuple:
-        transforms = PetCtTransforms.validation(self.config)
-        train_loader = self._build_loader(self.train_ids, transforms, shuffle=False, drop_last=False)
-        val_loader = self._build_loader(self.val_ids, transforms, shuffle=False, drop_last=False)
-        return train_loader, val_loader
-
-class BottleneckExtractor:
-    """Recharge le backbone de segmentation figé et sauvegarde sur disque le bottleneck
-    de chaque patient, indexé par case_id, pour les deux splits."""
+    Remplace l'extraction SwinUNETR. Chaque cas est prétraité par nnU-Net lui-même
+    (resampling à l'espacement cible + normalisation par canal, identiques à
+    l'entraînement) puis recadré au patch fixe du plan : le bottleneck a donc une taille
+    spatiale fixe, empilable. Le format de sortie est inchangé
+    (`{"bottleneck": (N, C, D, H, W), "case_id": [...]}`), consommé tel quel par
+    `pool_embedding` et les forêts T/N."""
 
     def __init__(self, config, device):
         self.config = config
         self.device = device
         self.data = PetCtDataModule(config)
 
-    def _load_frozen_backbone(self) -> SwinUNETRBackbone:
-        backbone = SwinUNETRBackbone(
-            input_channels=self.config.input_channels,
-            num_classes=self.config.num_seg_classes,
-            feature_size=self.config.feature_size,
-            use_checkpoint=self.config.use_checkpoint,
-            pretrained_path=self.config.pretrained_path,
-        ).to(self.device)
-        backbone.load_state_dict(torch.load(self.config.best_seg_path, map_location=self.device))
-        backbone.eval()
-        return backbone
+    def _load_predictor(self):
+        """nnUNetPredictor : reconstruit l'architecture + charge plans/dataset.json du
+        modèle entraîné. Les poids du fold sont dans `list_of_parameters`."""
+        from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+        predictor = nnUNetPredictor(
+            perform_everything_on_device=True, device=self.device,
+            verbose=False, verbose_preprocessing=False, allow_tqdm=False,
+        )
+        predictor.initialize_from_trained_model_folder(
+            self.config.nnunet_model_dir,
+            use_folds=(self.config.nnunet_fold,),
+            checkpoint_name=self.config.nnunet_checkpoint,
+        )
+        return predictor
+
+    def _build_encoder(self, predictor):
+        network = getattr(predictor.network, "_orig_mod", predictor.network)  # déballe torch.compile
+        network.load_state_dict(predictor.list_of_parameters[0])
+        network.to(self.device).eval()
+        return network.encoder  # forward → liste des skips ; le dernier est le bottleneck
 
     @torch.no_grad()
-    def _bottlenecks_of(self, backbone: SwinUNETRBackbone, loader: DataLoader) -> dict:
+    def _bottlenecks_of(self, predictor, encoder, preprocessor, crop, records: list) -> dict:
         bottlenecks, case_ids = [], []
-        for batch in tqdm(loader, desc="Extract", leave=False):
-            images = batch["image"].to(self.device, non_blocking=True)
-            _, bottleneck = backbone(images)
-            # .as_tensor() retire les métadonnées MONAI (MetaTensor) : le fichier de
-            # features reste un torch.Tensor pur, chargeable avec weights_only=True.
-            bottlenecks.append(bottleneck.as_tensor().float().cpu())
-            case_ids.extend(batch["case_id"])
+        for rec in tqdm(records, desc="Extract", leave=False):
+            # Prétraitement nnU-Net (resampling + normalisation par canal) — comme à l'entraînement.
+            data, _, _ = preprocessor.run_case(
+                [rec["ct"], rec["pet"]], None,
+                predictor.plans_manager, predictor.configuration_manager, predictor.dataset_json)
+            x = crop(torch.as_tensor(data)).unsqueeze(0).to(self.device, non_blocking=True)
+            with autocast():
+                bottleneck = encoder(x)[-1]                # (1, C, d, d, d)
+            b = bottleneck.detach().float().cpu()
+            bottlenecks.append(b.as_tensor() if hasattr(b, "as_tensor") else b)  # strip MetaTensor
+            case_ids.append(rec["case_id"])
         return {"bottleneck": torch.cat(bottlenecks), "case_id": case_ids}
 
     @torch.no_grad()
     def run(self):
-        backbone = self._load_frozen_backbone()
-        train_loader, val_loader = self.data.extraction_loaders()
+        from nnunetv2.preprocessing.preprocessors.default_preprocessor import DefaultPreprocessor
+        predictor = self._load_predictor()
+        encoder = self._build_encoder(predictor)
+        preprocessor = DefaultPreprocessor(verbose=False)
+        crop = ResizeWithPadOrCrop(spatial_size=tuple(predictor.configuration_manager.patch_size))
         os.makedirs(self.config.features_dir, exist_ok=True)
-        print("extracting train split")
-        torch.save(self._bottlenecks_of(backbone, train_loader), self.config.train_features_path)
-        print("extracting val split")
-        torch.save(self._bottlenecks_of(backbone, val_loader), self.config.val_features_path)
+        for split_ids, out_path, name in (
+            (self.data.train_ids, self.config.train_features_path, "train"),
+            (self.data.val_ids, self.config.val_features_path, "val"),
+        ):
+            records = self.data._build_records(split_ids)
+            print(f"extracting {name} split ({len(records)} cases)")
+            torch.save(self._bottlenecks_of(predictor, encoder, preprocessor, crop, records), out_path)
         print(f"features saved to {self.config.features_dir}")
 
 
 def ensure_bottlenecks(config):
-    """Extrait les embeddings TEP/CT figés si les fichiers de features sont absents.
-    Idempotent : partagé par train_tn.py et train_survival.py, n'utilise le GPU
-    que lors de la première extraction."""
+    """Extrait les embeddings du bottleneck de l'encodeur nnU-Net si les fichiers de
+    features sont absents. Idempotent : partagé par train_tn.py et train_survival.py,
+    n'utilise le GPU que lors de la première extraction."""
     if os.path.exists(config.train_features_path) and os.path.exists(config.val_features_path):
         print("bottleneck features already extracted, skipping")
         return
     device = torch.device("cuda")
-    BottleneckExtractor(config, device).run()
+    NNUNetBottleneckExtractor(config, device).run()

@@ -76,7 +76,7 @@ class EmbeddingDataset:
 
 def load_embeddings(config) -> tuple[EmbeddingDataset, EmbeddingDataset]:
     """Charge les embeddings figés des deux splits et les joint à leurs cibles."""
-    # weights_only=False : features produites par notre propre BottleneckExtractor.
+    # weights_only=False : features produites par notre propre NNUNetBottleneckExtractor.
     train_features = torch.load(config.train_features_path, map_location="cpu", weights_only=False)
     val_features = torch.load(config.val_features_path, map_location="cpu", weights_only=False)
     patients = pd.read_csv(config.csv_path)

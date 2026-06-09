@@ -1,141 +1,173 @@
+"""Phase 1 — Segmentation nnU-Net (MONAI `nnUNetV2Runner` pilotant le paquet `nnunetv2`).
+
+Remplace l'ancien backbone SwinUNETR + recherche d'hyperparamètres Optuna. nnU-Net est
+auto-configurant : il dérive patch size, batch size, normalisation et data augmentation
+de l'empreinte (« fingerprint ») du jeu de données. Il n'y a donc plus ni recherche HP ni
+retrain séparé — l'entraînement de cette phase est complet à lui seul.
+
+Pipeline :
+  1. Construit l'arborescence brute nnU-Net (`imagesTr`/`labelsTr` + `dataset.json`) à partir
+     des volumes CT/PET/masque déjà prétraités, via des liens symboliques (CT → canal 0000,
+     PET → canal 0001). On contourne `runner.convert_dataset()` qui exige un unique volume
+     multi-canaux par cas et renomme les patients en `case_N`.
+  2. Empreinte + planification + prétraitement (`plan_and_process`).
+  3. Fige le split train/val déterministe du projet (`split_case_ids`) en fold 0
+     (`splits_final.json`), pour que la validation porte sur exactement les mêmes patients
+     que le reste de la pipeline.
+  4. Entraîne la configuration demandée (3d_fullres par défaut) sur ce fold.
+"""
 import os
-import torch
-import torch.optim as optim
-import optuna
-from optuna.storages import JournalStorage, JournalFileStorage
-from torch.cuda.amp import autocast, GradScaler
-from tqdm import tqdm
+import json
 import config
-from src.networks import SwinUNETRBackbone
-from src.image_data import PetCtDataModule
-from utils.losses import seg_loss
-from monai.metrics import DiceMetric
-from monai.transforms import AsDiscrete
-from monai.data import decollate_batch
-from monai.inferers import sliding_window_inference
+
+# nnU-Net lit ces variables d'environnement dès l'import de `nnunetv2` : les fixer avant.
+os.environ["nnUNet_raw"] = config.nnunet_raw_dir
+os.environ["nnUNet_preprocessed"] = config.nnunet_preprocessed_dir
+os.environ["nnUNet_results"] = config.nnunet_results_dir
+
+import pandas as pd
+from monai.apps.nnunet import nnUNetV2Runner
+from nnunetv2.dataset_conversion.generate_dataset_json import generate_dataset_json
+from src.clinical_data import split_case_ids
 
 
-def train_one_epoch(model, loader, optimizer, scaler, device, config):
-    model.train()
-    total_loss = 0.0
-    n_batches = 0
-    for batch in tqdm(loader, desc="Train", leave=False):
-        ct_pet = batch["image"].to(device, non_blocking=True)
-        seg_gt = batch["label"].to(device, non_blocking=True)
-        with autocast():
-            seg_logits, _ = model(ct_pet)
-            loss = seg_loss(seg_logits, seg_gt)
-        optimizer.zero_grad(set_to_none=True)
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), config.seg_grad_clip_norm)
-        scaler.step(optimizer)
-        scaler.update()
-        total_loss += loss.item()
-        n_batches += 1
-    return total_loss / max(n_batches, 1)
+def build_records(case_ids: list, known_patients: set) -> list:
+    """(case_id, ct, pet, label) pour les patients du CSV dont les 3 volumes existent."""
+    records = []
+    for case_id in case_ids:
+        if case_id not in known_patients:
+            continue
+        patient_dir = os.path.join(config.data_root, case_id)
+        ct = os.path.join(patient_dir, f"{case_id}__CT.nii.gz")
+        pet = os.path.join(patient_dir, f"{case_id}__PT.nii.gz")
+        label = os.path.join(patient_dir, f"{case_id}.nii.gz")
+        if not (os.path.exists(ct) and os.path.exists(pet) and os.path.exists(label)):
+            continue
+        records.append((case_id, ct, pet, label))
+    return records
 
 
-@torch.no_grad()
-def validate(model, loader, device, config):
-    model.eval()
-    dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
-    post_label = AsDiscrete(to_onehot=config.num_seg_classes)
-    post_pred = AsDiscrete(argmax=True, to_onehot=config.num_seg_classes)
-    for batch in tqdm(loader, desc="Val", leave=False):
-        ct_pet = batch["image"].to(device)
-        seg_gt = batch["label"].to(device)
-        with autocast():
-            seg_logits = sliding_window_inference(
-                ct_pet, roi_size=config.spatial_size, sw_batch_size=config.batch_size,
-                predictor=lambda x: model(x)[0], overlap=0.5, mode="gaussian",
-            )
-        gt = [post_label(x) for x in decollate_batch(seg_gt)]
-        pr = [post_pred(x) for x in decollate_batch(seg_logits)]
-        dice_metric(y_pred=pr, y=gt)
-    per_class = dice_metric.aggregate()        # un Dice par classe foreground (GTVp, GTVn)
-    dice_metric.reset()
-    return torch.nanmean(per_class).item(), per_class.tolist()
+def _symlink(src: str, dst: str):
+    if os.path.lexists(dst):
+        return
+    os.symlink(os.path.abspath(src), dst)
 
 
-def build_model(device):
-    return SwinUNETRBackbone(
-        input_channels=config.input_channels,
-        num_classes=config.num_seg_classes,
-        feature_size=config.feature_size,
-        use_checkpoint=config.use_checkpoint,
-        pretrained_path=config.pretrained_path,
-    ).to(device)
+def prepare_raw_dataset(records: list) -> str:
+    """Crée `Dataset<ID>_<name>/{imagesTr,labelsTr}` (liens symboliques) + `dataset.json`,
+    et un datalist MONAI (trace + clé requise par l'`input_config` du runner). Retourne le
+    chemin du datalist."""
+    raw_dir = os.path.join(config.nnunet_raw_dir, config.nnunet_dataset_dir)
+    images_dir = os.path.join(raw_dir, "imagesTr")
+    labels_dir = os.path.join(raw_dir, "labelsTr")
+    for d in (images_dir, labels_dir):
+        os.makedirs(d, exist_ok=True)
+
+    datalist = []
+    for case_id, ct, pet, label in records:
+        _symlink(ct, os.path.join(images_dir, f"{case_id}_0000.nii.gz"))   # canal 0 = CT
+        _symlink(pet, os.path.join(images_dir, f"{case_id}_0001.nii.gz"))  # canal 1 = PET (SUV)
+        _symlink(label, os.path.join(labels_dir, f"{case_id}.nii.gz"))
+        datalist.append({"image": [ct, pet], "label": label, "case_id": case_id})
+
+    # background=0, GTVp=1 (tumeur primaire), GTVn=2 (ganglions) — labels HECKTOR.
+    generate_dataset_json(
+        output_folder=raw_dir,
+        channel_names={0: "CT", 1: "PET"},
+        labels={"background": 0, "GTVp": 1, "GTVn": 2},
+        num_training_cases=len(records),
+        file_ending=".nii.gz",
+        dataset_name=config.nnunet_dataset_name,
+    )
+
+    datalist_path = os.path.join(config.nnunet_work_dir, "datalist.json")
+    with open(datalist_path, "w") as f:
+        json.dump({"training": datalist, "testing": []}, f, indent=2)
+    print(f"[nnunet] {len(records)} cas → {raw_dir}")
+    return datalist_path
 
 
-def objective(trial, train_loader, val_loader, device):
-    # Seul le LR est tuné — wd et poly_power ont des optimums plats sur ce type de tâche
-    lr = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
-    weight_decay = 1e-5
-    poly_power = 0.9
+def write_project_split(train_ids: list, val_ids: list, valid_case_ids: list):
+    """Fige le split déterministe du projet (`split_case_ids`) en fold 0 du
+    `splits_final.json` nnU-Net : la validation porte alors exactement sur les mêmes
+    patients que le reste de la pipeline. nnU-Net régénère une CV 5-fold s'il est absent."""
+    valid = set(valid_case_ids)
+    split = [{
+        "train": [c for c in train_ids if c in valid],
+        "val": [c for c in val_ids if c in valid],
+    }]
+    preprocessed_dir = os.path.join(config.nnunet_preprocessed_dir, config.nnunet_dataset_dir)
+    os.makedirs(preprocessed_dir, exist_ok=True)
+    with open(os.path.join(preprocessed_dir, "splits_final.json"), "w") as f:
+        json.dump(split, f, indent=2)
+    print(f"[nnunet] fold 0 figé : {len(split[0]['train'])} train / {len(split[0]['val'])} val")
 
-    model = build_model(device)
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.PolynomialLR(
-        optimizer, total_iters=config.seg_search_epochs, power=poly_power)
-    scaler = GradScaler()
 
-    trial_best_dice = 0.0
-    try:
-        for epoch in range(config.seg_search_epochs):
-            train_loss = train_one_epoch(model, train_loader, optimizer, scaler, device, config)
-            dice, per_class = validate(model, val_loader, device, config)
-            pc = "/".join(f"{d:.4f}" for d in per_class)
-            print(f"trial {trial.number} epoch {epoch+1} loss {train_loss:.4f} dice {dice:.4f} (GTVp/GTVn {pc})")
-
-            if dice > trial_best_dice:
-                trial_best_dice = dice
-
-            trial.report(dice, epoch)
-            if trial.should_prune():
-                raise optuna.TrialPruned()
-
-            scheduler.step()
-    except torch.cuda.OutOfMemoryError as e:
-        print(f"trial {trial.number} OOM at epoch {epoch}: {e}")
-        torch.cuda.empty_cache()
-        raise optuna.TrialPruned()
-
-    return trial_best_dice
+def report_validation():
+    """Affiche le Dice de validation (moyenne foreground + par classe) écrit par nnU-Net
+    à la fin de l'entraînement."""
+    summary = os.path.join(
+        config.nnunet_model_dir, f"fold_{config.nnunet_fold}", "validation", "summary.json")
+    if not os.path.exists(summary):
+        print(f"[nnunet] summary de validation introuvable ({summary})")
+        return
+    with open(summary) as f:
+        data = json.load(f)
+    mean = data.get("foreground_mean", {}).get("Dice")
+    per_class = {k: v.get("Dice") for k, v in data.get("mean", {}).items()}
+    print(f"[nnunet] Dice validation (moyenne foreground) {mean}")
+    print(f"[nnunet] Dice par classe (label → Dice) {per_class}")
 
 
 def main():
-    torch.backends.cudnn.benchmark = True
-    device = torch.device("cuda")
-    for d in (config.experiment_dir, config.checkpoint_dir):
+    for d in (config.experiment_dir, config.nnunet_work_dir, config.nnunet_raw_dir,
+              config.nnunet_preprocessed_dir, config.nnunet_results_dir):
         os.makedirs(d, exist_ok=True)
-    train_loader, val_loader = PetCtDataModule(config).segmentation_loaders()
 
-    storage = JournalStorage(JournalFileStorage(
-        os.path.join(config.experiment_dir, "optuna_seg.log")))
-    sampler = optuna.samplers.TPESampler(n_startup_trials=10, multivariate=True)
-    pruner = optuna.pruners.HyperbandPruner(
-        min_resource=5,
-        max_resource=config.seg_search_epochs,
-        reduction_factor=3,
-    )
-    study = optuna.create_study(
-        storage=storage,
-        study_name="seg_swinunetr",
-        sampler=sampler,
-        pruner=pruner,
-        direction="maximize",
-        load_if_exists=True,
-    )
-    study.optimize(
-        lambda trial: objective(trial, train_loader, val_loader, device),
-        n_trials=config.seg_n_trials,
-        timeout=config.seg_search_timeout_hours * 3600,
-        catch=(RuntimeError,),
+    known_patients = set(pd.read_csv(config.csv_path)["PatientID"])
+    train_ids, val_ids = split_case_ids(config)
+    records = build_records(train_ids + val_ids, known_patients)
+    valid_case_ids = [r[0] for r in records]
+
+    datalist_path = prepare_raw_dataset(records)
+
+    runner = nnUNetV2Runner(
+        input_config={
+            "dataset_name_or_id": config.nnunet_dataset_id,
+            "datalist": datalist_path,
+            "dataroot": config.data_root,
+            "modality": config.nnunet_modality,
+            "nnunet_raw": config.nnunet_raw_dir,
+            "nnunet_preprocessed": config.nnunet_preprocessed_dir,
+            "nnunet_results": config.nnunet_results_dir,
+        },
+        trainer_class_name=config.nnunet_trainer,
+        work_dir=config.nnunet_work_dir,
     )
 
-    print(f"best dice {study.best_value:.4f}")
-    print(f"best params {study.best_params}")
+    # Empreinte + planification + prétraitement de la seule configuration entraînée.
+    runner.plan_and_process(
+        verify_dataset_integrity=True,
+        gpu_memory_target=config.nnunet_gpu_memory_gb,
+        c=(config.nnunet_configuration,),
+        n_proc=(config.num_workers,),
+        npfp=config.num_workers,
+    )
+
+    if config.nnunet_use_project_split:
+        if config.nnunet_fold != 0:
+            raise ValueError(
+                "nnunet_use_project_split=True impose nnunet_fold=0 (le projet n'a qu'un split)")
+        write_project_split(train_ids, val_ids, valid_case_ids)
+
+    runner.train_single_model(
+        config=config.nnunet_configuration,
+        fold=config.nnunet_fold,
+        gpu_id=0,
+    )
+
+    report_validation()
+    print(f"[nnunet] modèles sauvegardés dans {config.nnunet_results_dir}")
 
 
 if __name__ == "__main__":

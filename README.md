@@ -18,40 +18,49 @@ This unified task reflects a realistic clinical workflow, integrating diagnosis,
 ## 2026 Pipeline — Segmentation profonde + têtes-forêts sur embedding
 
 L'entraînement end-to-end conjoint (seg + T/N + survie en un seul forward) était
-contraint à `batch_size=2` par la VRAM du SwinUNETR sur volumes 128³, ce qui rendait
-les têtes neuronales de classification et de survie instables. La pipeline est donc
+contraint à `batch_size=2` par la VRAM sur volumes 128³, ce qui rendait les têtes
+neuronales de classification et de survie instables. La pipeline est donc
 **entièrement découplée**, sans aucune fusion de données :
 
-1. **Phase 1** — segmentation SwinUNETR (seule tâche profonde).
-2. **Embedding** — le bottleneck figé de chaque patient est réduit en un vecteur TEP/CT.
+1. **Phase 1** — segmentation **nnU-Net v2** (seule tâche profonde).
+2. **Embedding** — le bottleneck figé de l'encodeur nnU-Net de chaque patient est réduit en un vecteur TEP/CT.
 3. **Phase 2** — deux têtes **indépendantes**, sans aucune fusion :
    - un `RandomForest` (stades T et N) entraîné *uniquement* sur l'embedding TEP/CT ;
    - un `RandomSurvivalForest` (survie sans rechute) entraîné *uniquement* sur les
      variables cliniques tabulaires du CSV — l'image n'intervient pas.
 
-### Phase 1 — Segmentation (`train_seg.py`)
+### Phase 1 — Segmentation nnU-Net (`train_seg.py`)
+
+La segmentation repose désormais sur **nnU-Net v2**, piloté par le `nnUNetV2Runner` de
+MONAI (paquet `nnunetv2`). nnU-Net est auto-configurant : il dérive patch size, batch size,
+normalisation par canal et data augmentation de l'empreinte du jeu de données — **plus de
+recherche d'hyperparamètres Optuna ni de retrain séparé**.
 
 ```
-  CT+PET (RAW)
-        |
-        | preprocessing : resampling 2×2×2 mm³, crop 128³ centré sur la tumeur
-        | transforms (src/transforms.py) : flip, noise, intensity
+  CT+PET (RAW, déjà prétraités en SUV)
+        │
+        │ train_seg.py construit l'arborescence brute nnU-Net via liens symboliques :
+        │   imagesTr/<case>_0000.nii.gz → CT     (canal 0)
+        │   imagesTr/<case>_0001.nii.gz → PET    (canal 1)
+        │   labelsTr/<case>.nii.gz      → masque (0=fond, 1=GTVp, 2=GTVn)
         ▼
-CT+PET (B, 2, 128, 128, 128)
+  nnUNetV2Runner.plan_and_process()   ← empreinte + planification + prétraitement
+        │
+        │ splits_final.json : fold 0 figé sur split_case_ids (mêmes patients que la
+        │ pipeline image — cohérence du split conservée)
         ▼
-    SwinUNETR (src/swinunetr.py)
-    Poids SSL pré-entraînés sur 5050 CTs (model_swinvit.pt)
-        │
-    L_Seg = Dice+Focal (utils/losses.py)  ← SEULE perte de la phase 1
-        │
-        ├──► seg_mask (B, 3, D, H, W)        → sélection du best model (Dice)
-        │
-        └──► bottleneck (B, 768, 4, 4, 4)
-
-À la première exécution de train_tn.py, `ensure_bottlenecks()` recharge best_model.pth,
-GÈLE le backbone, et extrait le bottleneck spatial de CHAQUE patient vers
-experiments/<exp>/features/{train,val}.pt (déterministe, réutilisé ensuite).
+  nnUNetV2Runner.train_single_model("3d_fullres", fold=0)
+        │   perte Dice+CE, deep supervision, SW inference — gérés par nnU-Net
+        ▼
+  checkpoints nnU-Net + validation/summary.json (Dice par classe)
+  → experiments/<exp>/nnunet/nnUNet_results/Dataset001_HECKTOR/...
 ```
+
+À la première exécution de `train_tn.py`, `ensure_bottlenecks()` (`NNUNetBottleneckExtractor`)
+recharge le modèle nnU-Net entraîné, **GÈLE son encodeur**, prétraite chaque patient *via
+nnU-Net lui-même* (resampling + normalisation par canal), recadre au patch du plan, et
+sauvegarde le **bottleneck du dernier étage d'encodage** vers
+`experiments/<exp>/features/{train,val}.pt` (déterministe, réutilisé ensuite).
 
 ### Phase 2 — Têtes-forêts indépendantes (`train_tn.py`, `train_survival.py`)
 
@@ -60,7 +69,7 @@ experiments/<exp>/features/{train,val}.pt (déterministe, réutilisé ensuite).
    features/{train,val}.pt                   HECKTOR_2026_training_data.csv
         │                                          │
         │ pool_embedding : moyenne ⊕ max          │ ClinicalEncoder : âge standardisé +
-        │ → embedding (N, 2·768)                   │ one-hot (genre, tabac, alcool,
+        │ → embedding (N, 2·C_enc)                 │ one-hot (genre, tabac, alcool,
         │                                          │ perf. status, HPV, traitement)
         ▼                                          ▼
    ┌──────────────┬──────────────┐         RandomSurvivalForest  (train_survival.py)
@@ -82,8 +91,7 @@ experiments/<exp>/features/{train,val}.pt (déterministe, réutilisé ensuite).
 ### Exécution
 
 ```bash
-python train_seg.py        # phase 1 : recherche HP segmentation
-python retrain_seg.py      # phase 1 : retrain final, sauvegarde best_model.pth
+python train_seg.py        # phase 1 : segmentation nnU-Net (auto-configurant, fold 0)
 python train_tn.py         # phase 2 : extraction auto des embeddings + RandomForest T/N
 python train_survival.py   # phase 2 : RandomSurvivalForest sur données cliniques (CSV)
 ```
@@ -112,20 +120,17 @@ python train_foundation_survival.py   # extraction CT-FM (cache) + RandomSurviva
 ```
 hecktor2026/
 │
-├── train_seg.py                 # Phase 1 : recherche HP segmentation (Optuna)
-├── retrain_seg.py               # Phase 1 : retrain final → best_model.pth
+├── train_seg.py                 # Phase 1 : segmentation nnU-Net (MONAI nnUNetV2Runner)
 ├── train_tn.py                  # Phase 2 : RandomForest T et N sur embedding figé
 ├── train_survival.py            # Phase 2 : RandomSurvivalForest sur données cliniques
 ├── train_foundation_survival.py # Variante : RandomSurvivalForest sur embedding CT-FM (CT seule)
 │
 ├── src/
-│   ├── image_data.py            # DataModule seg + BottleneckExtractor + ensure_bottlenecks
-│   ├── clinical_data.py         # embedding (T/N) + encodeur clinique & survie (RFS)
-│   └── networks.py              # SwinUNETRBackbone : returns (seg_logits, bottleneck)
+│   ├── image_data.py            # split patients + NNUNetBottleneckExtractor + ensure_bottlenecks
+│   └── clinical_data.py         # embedding (T/N) + encodeur clinique & survie (RFS)
 │
 ├── utils/
-│   ├── losses.py                # seg_loss = DiceFocal
 │   └── metrics.py               # balanced_accuracy, c_index
 │
-└── config.py                    # feature_size, lr, batch_size, n_trials des forêts
+└── config.py                    # réglages nnU-Net, split, chemins, n_trials des forêts
 ```
