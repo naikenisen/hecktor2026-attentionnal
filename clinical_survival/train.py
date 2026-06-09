@@ -2,7 +2,7 @@
 
 Lancement (depuis la racine du dépôt) :
 
-    python -m survival.train
+    python -m clinical_survival.train
 
 Aucune information image : la forêt de survie est entraînée uniquement sur les variables
 tabulaires du CSV (âge standardisé + one-hot : genre, tabac, alcool, performance status,
@@ -15,7 +15,7 @@ import joblib
 from sksurv.util import Surv
 
 import config
-from survival.dataset import load_clinical_survival
+from clinical_survival.dataset import load_clinical_survival
 from src.survival_forest import search_rsf
 
 

@@ -29,6 +29,7 @@ features_dir = os.path.join(experiment_dir, "features")
 best_tn_t_path = os.path.join(checkpoint_dir, "tn_t_rf.joblib")
 best_tn_n_path = os.path.join(checkpoint_dir, "tn_n_rf.joblib")
 best_survival_path = os.path.join(checkpoint_dir, "survival_rsf.joblib")
+best_nnunet_survival_path = os.path.join(checkpoint_dir, "survival_nnunet_rsf.joblib")
 train_features_path = os.path.join(features_dir, "train.pt")
 val_features_path = os.path.join(features_dir, "val.pt")
 

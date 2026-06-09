@@ -1,8 +1,8 @@
 #!/bin/ksh
 #$ -q gpu
-#$ -o train_survival.out
+#$ -o train_clinical_survival.out
 #$ -j y
-#$ -N train_survival
+#$ -N train_clinical_survival
 
 set -e
 
@@ -27,4 +27,4 @@ export PYTHONPATH="$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH"
 export MPLCONFIGDIR="$TMPDIR/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
-python -m survival.train
+python -m clinical_survival.train

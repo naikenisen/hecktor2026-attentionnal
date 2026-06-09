@@ -62,7 +62,7 @@ nnU-Net lui-même* (resampling + normalisation par canal), recadre au patch du p
 sauvegarde le **bottleneck du dernier étage d'encodage** vers
 `experiments/<exp>/features/{train,val}.pt` (déterministe, réutilisé ensuite).
 
-### Phase 2 — Têtes-forêts indépendantes (paquets `tn`, `survival`)
+### Phase 2 — Têtes-forêts indépendantes (paquets `tn`, `clinical_survival`)
 
 ```
    EMBEDDING TEP/CT (image)                  DONNÉES CLINIQUES (CSV)
@@ -72,7 +72,7 @@ sauvegarde le **bottleneck du dernier étage d'encodage** vers
         │ → embedding (N, 2·C_enc)                 │ one-hot (genre, tabac, alcool,
         │                                          │ perf. status, HPV, traitement)
         ▼                                          ▼
-   ┌──────────────┬──────────────┐         RandomSurvivalForest  (survival.train)
+   ┌──────────────┬──────────────┐         RandomSurvivalForest  (clinical_survival.train)
    ▼              ▼                         cible (event, RFS) → score de risque
  RandomForest T   RandomForest N                   │
    (tn.train)       (tn.train)                    c-index
@@ -94,9 +94,10 @@ Chaque tâche est un paquet, lancé comme module **depuis la racine du dépôt**
 associés restent à la racine et font `cd` dans le projet avant d'appeler ces commandes) :
 
 ```bash
-python -m seg.train        # phase 1 : segmentation nnU-Net (auto-configurant, fold 0)
-python -m tn.train         # phase 2 : extraction auto des embeddings + RandomForest T/N
-python -m survival.train   # phase 2 : RandomSurvivalForest sur données cliniques (CSV)
+python -m seg.train               # phase 1 : segmentation nnU-Net (auto-configurant, fold 0)
+python -m tn.train                # phase 2 : extraction auto des embeddings + RandomForest T/N
+python -m clinical_survival.train # phase 2 : RandomSurvivalForest sur données cliniques (CSV)
+python -m nnunet_survival.train   # phase 2 : RandomSurvivalForest sur le bottleneck nnU-Net
 ```
 
 ### Variante survie — embedding CT du modèle de fondation CT-FM (`foundation_survival`)
@@ -116,13 +117,26 @@ pip install lighter_zoo                   # dépendance du modèle de fondation
 python -m foundation_survival.train       # extraction CT-FM (cache) + RandomSurvivalForest
 ```
 
+### Variante survie — bottleneck nnU-Net (`nnunet_survival`)
+
+Troisième tête de survie : on réutilise **le même embedding que `tn`** — le bottleneck de
+l'encodeur nnU-Net (`src.nnunet_embedding`, extrait une seule fois puis mis en cache dans
+`features/{train,val}.pt`) — mais on entraîne un `RandomSurvivalForest` sur la cible
+`(événement, RFS)` au lieu des stades T/N. L'alignement embedding ↔ survie et la forêt sont
+mutualisés (`src.survival_targets`, `src.survival_forest`).
+
+```bash
+python -m nnunet_survival.train           # réutilise le cache d'embeddings de tn + RandomSurvivalForest
+```
+
 ---
 
 ## Repository structure
 
-Le code est séparé en un paquet par tâche (`seg`, `tn`, `survival`, `foundation_survival`),
-plus `preprocessing/` (prépa des données, scripts autonomes). Les `.sh` de soumission restent
-à la racine. `src/` regroupe le code partagé entre têtes (split, métriques, forêt de survie).
+Le code est séparé en un paquet par tâche (`seg`, `tn`, `clinical_survival`,
+`foundation_survival`, `nnunet_survival`), plus `preprocessing/` (prépa des données, scripts
+autonomes). Les `.sh` de soumission restent à la racine. `src/` regroupe le code partagé entre
+têtes (split, embedding nnU-Net, métriques, alignement/forêt de survie).
 
 ```
 hecktor2026/
@@ -134,19 +148,22 @@ hecktor2026/
 │   └── train.py                 #   point d'entrée  →  python -m seg.train
 │
 ├── tn/                          # Phase 2 — stades T et N (RandomForest sur embedding figé)
-│   ├── extractor.py             #   PetCtDataModule + NNUNetBottleneckExtractor + ensure_bottlenecks
-│   ├── dataset.py               #   pool_embedding + EmbeddingDataset (embedding ↔ cibles T/N)
+│   ├── dataset.py               #   EmbeddingDataset (embedding nnU-Net ↔ cibles T/N)
 │   ├── forest.py                #   RandomForestClassifier + recherche Optuna (balanced acc)
 │   └── train.py                 #   point d'entrée  →  python -m tn.train
 │
-├── survival/                    # Phase 2 — survie RFS (RandomSurvivalForest, données cliniques)
+├── clinical_survival/           # Phase 2 — survie RFS (RandomSurvivalForest, données cliniques)
 │   ├── dataset.py               #   ClinicalEncoder + ClinicalSurvivalDataset (variables cliniques)
-│   └── train.py                 #   point d'entrée  →  python -m survival.train
+│   └── train.py                 #   point d'entrée  →  python -m clinical_survival.train
 │
 ├── foundation_survival/         # Variante — survie RFS sur embedding CT-FM (CT seule)
 │   ├── extractor.py             #   extraction des features CT-FM (SegResNet pré-entraîné)
-│   ├── dataset.py               #   alignement embedding ↔ cible de survie
+│   ├── dataset.py               #   alignement embedding ↔ cible de survie (src.survival_targets)
 │   └── train.py                 #   point d'entrée  →  python -m foundation_survival.train
+│
+├── nnunet_survival/             # Variante — survie RFS sur le bottleneck nnU-Net (même embedding que tn)
+│   ├── dataset.py               #   pool_embedding (src) + alignement embedding ↔ cible de survie
+│   └── train.py                 #   point d'entrée  →  python -m nnunet_survival.train
 │
 ├── preprocessing/               # Prépa des données (scripts autonomes, hors pipeline d'entraînement)
 │   ├── convert_nifti_Bq_SUV.py  #   conversion TEP BQML → SUVbw (bq_to_suv)
@@ -154,9 +171,12 @@ hecktor2026/
 │
 ├── src/                         # Code partagé entre plusieurs têtes
 │   ├── split.py                 #   split_case_ids — split train/val déterministe (toutes les têtes)
+│   ├── nnunet_embedding.py      #   extraction du bottleneck nnU-Net + pool_embedding (tn, nnunet_survival)
+│   ├── survival_targets.py      #   alignement embedding ↔ (RFS, événement) (foundation, nnunet_survival)
 │   ├── metrics.py               #   balanced_accuracy, c_index
-│   └── survival_forest.py       #   RandomSurvivalForest + Optuna, partagé survival/foundation
+│   └── survival_forest.py       #   RandomSurvivalForest + Optuna (clinical/foundation/nnunet_survival)
 │
-├── train_seg.sh / train_tn.sh / train_survival.sh / train_foundation_survival.sh / preprocess.sh
+├── train_seg.sh / train_tn.sh / train_clinical_survival.sh / train_foundation_survival.sh
+│   train_nnunet_survival.sh / preprocess.sh
 └── config.py                    # réglages nnU-Net, split, chemins, n_trials des forêts
 ```

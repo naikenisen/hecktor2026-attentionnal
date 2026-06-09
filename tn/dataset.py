@@ -1,12 +1,14 @@
 """Jeu de données d'embeddings TEP/CT figés pour les stades T/N.
 
-Charge les features extraites par `tn.extractor` (bottleneck de l'encodeur nnU-Net), les
-réduit en un vecteur par patient (moyenne ⊕ max global) et les aligne par case_id avec les
+Charge les features extraites par `src.nnunet_embedding` (bottleneck de l'encodeur nnU-Net),
+les réduit en un vecteur par patient (`pool_embedding`) et les aligne par case_id avec les
 cibles de stade T et N lues dans le CSV.
 """
 import numpy as np
 import pandas as pd
 import torch
+
+from src.nnunet_embedding import pool_embedding
 
 T_STAGES = ["T1", "T2", "T3", "T4"]
 N_STAGES = ["N0", "N1", "N2", "N3"]
@@ -20,15 +22,6 @@ def _stage_index(value, stages: list) -> int:
     if label.startswith("N2"):
         label = "N2"
     return stages.index(label) if label in stages else UNKNOWN_STAGE
-
-
-def pool_embedding(bottleneck: torch.Tensor) -> np.ndarray:
-    """Réduit le bottleneck spatial (N, C, D, H, W) en un vecteur par patient.
-    On concatène moyenne globale (contexte) et maximum global (pic d'activation,
-    proche d'un SUVmax) : l'embedding TEP/CT figé servi tel quel aux forêts."""
-    mean = bottleneck.mean(dim=(2, 3, 4))
-    peak = bottleneck.amax(dim=(2, 3, 4))
-    return torch.cat([mean, peak], dim=1).numpy()
 
 
 class EmbeddingDataset:

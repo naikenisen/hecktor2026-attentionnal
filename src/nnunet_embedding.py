@@ -1,9 +1,10 @@
-"""Extraction des embeddings TEP/CT pour les stades T/N.
+"""Extraction et mise en commun de l'embedding du bottleneck de l'encodeur nnU-Net.
 
 Recharge le modèle nnU-Net entraîné (phase 1), GÈLE son encodeur, et sauvegarde le
 bottleneck spatial profond de chaque patient (carte du dernier étage d'encodage) vers
-`features/{train,val}.pt`. C'est la passerelle entre la segmentation et les forêts T/N :
-seul `tn` consomme ces embeddings.
+`features/{train,val}.pt`. Code **partagé** par les têtes qui exploitent cet embedding :
+`tn` (stades T/N) et `nnunet_survival` (survie). `pool_embedding` réduit le bottleneck
+spatial en un vecteur par patient.
 """
 import os
 import torch
@@ -12,6 +13,15 @@ from tqdm import tqdm
 from torch.cuda.amp import autocast
 from monai.transforms import ResizeWithPadOrCrop
 from src.split import split_case_ids
+
+
+def pool_embedding(bottleneck: torch.Tensor):
+    """Réduit le bottleneck spatial (N, C, D, H, W) en un vecteur par patient.
+    On concatène moyenne globale (contexte) et maximum global (pic d'activation,
+    proche d'un SUVmax) : l'embedding TEP/CT figé servi tel quel aux forêts."""
+    mean = bottleneck.mean(dim=(2, 3, 4))
+    peak = bottleneck.amax(dim=(2, 3, 4))
+    return torch.cat([mean, peak], dim=1).numpy()
 
 
 class PetCtDataModule:
@@ -51,8 +61,8 @@ class NNUNetBottleneckExtractor:
     Chaque cas est prétraité par nnU-Net lui-même (resampling à l'espacement cible +
     normalisation par canal, identiques à l'entraînement) puis recadré au patch fixe du
     plan : le bottleneck a donc une taille spatiale fixe, empilable. Le format de sortie
-    (`{"bottleneck": (N, C, D, H, W), "case_id": [...]}`) est consommé tel quel par
-    `tn.dataset.pool_embedding` et les forêts T/N."""
+    (`{"bottleneck": (N, C, D, H, W), "case_id": [...]}`) est consommé via `pool_embedding`
+    par les forêts T/N et de survie."""
 
     def __init__(self, config, device):
         self.config = config
@@ -116,8 +126,8 @@ class NNUNetBottleneckExtractor:
 
 def ensure_bottlenecks(config):
     """Extrait les embeddings du bottleneck de l'encodeur nnU-Net si les fichiers de
-    features sont absents. Idempotent (utilisé par `tn.train`) : n'utilise le GPU que lors
-    de la première extraction."""
+    features sont absents. Idempotent (utilisé par `tn.train` et `nnunet_survival.train`) :
+    n'utilise le GPU que lors de la première extraction."""
     if os.path.exists(config.train_features_path) and os.path.exists(config.val_features_path):
         print("bottleneck features already extracted, skipping")
         return
