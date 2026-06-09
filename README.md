@@ -15,14 +15,19 @@ This unified task reflects a realistic clinical workflow, integrating diagnosis,
 
 ---
 
-## 2026 Pipeline — Decoupled Two-Phase Multitask Learning
+## 2026 Pipeline — Segmentation profonde + têtes-forêts sur embedding
 
 L'entraînement end-to-end conjoint (seg + T/N + survie en un seul forward) était
-contraint à `batch_size=2` par la VRAM du SwinUNETR sur volumes 128³. Ce batch
-minuscule rendait la survie (DeepHit, qui a besoin de paires d'événements) et la
-classification (forte sur-représentation de N2) incapables d'apprendre, pendant que
-la pondération par incertitude étouffait ces tâches difficiles. La solution :
-**découpler la segmentation des tâches tabulaires** en deux phases.
+contraint à `batch_size=2` par la VRAM du SwinUNETR sur volumes 128³, ce qui rendait
+les têtes neuronales de classification et de survie instables. La pipeline est donc
+**entièrement découplée**, sans aucune fusion de données :
+
+1. **Phase 1** — segmentation SwinUNETR (seule tâche profonde).
+2. **Embedding** — le bottleneck figé de chaque patient est réduit en un vecteur TEP/CT.
+3. **Phase 2** — deux têtes **indépendantes**, chacune une forêt aléatoire entraînée
+   *uniquement* sur cet embedding : un `RandomForest` pour les stades T et N, un
+   `RandomSurvivalForest` pour la survie sans rechute. Aucune variable clinique
+   tabulaire n'est fusionnée à l'image.
 
 ### Phase 1 — Segmentation (`train_seg.py`)
 
@@ -43,60 +48,43 @@ CT+PET (B, 2, 128, 128, 128)
         │
         └──► bottleneck (B, 768, 4, 4, 4)
 
-Après convergence, train_seg.py recharge best_model.pth, GÈLE le backbone, et
-extrait le bottleneck spatial de CHAQUE patient (+ cibles T/N/RFS/event/clinique)
-vers experiments/<exp>/features/{train,val}.pt  (~150 MB, déterministe).
+À la première exécution d'une tâche tabulaire, `ensure_bottlenecks()` recharge
+best_model.pth, GÈLE le backbone, et extrait le bottleneck spatial de CHAQUE patient
+vers experiments/<exp>/features/{train,val}.pt (déterministe, réutilisé ensuite).
 ```
 
-### Phase 2 — Têtes cliniques sur features cachées (`train_clinical.py`)
+### Phase 2 — Têtes-forêts sur embedding figé (`train_tn.py`, `train_survival.py`)
 
 ```
-features/{train,val}.pt   (bottlenecks figés + cibles tabulaires)
+features/{train,val}.pt   (bottlenecks figés, par case_id)
         │
-        │  gros batch (64) désormais possible : plus de volumes 3D en mémoire
+        │  pool_embedding : GAP (moyenne) ⊕ max global  →  embedding (N, 2·768)
+        │  (src/clinical_data.py — joint aux cibles T/N/RFS/event par case_id)
         ▼
-ClinicalModel (src/clinical_model.py)
+   embedding TEP/CT  (aucune variable clinique fusionnée)
         │
-        ├─ bottleneck ─┬─► T-Head (GAP→256→logits B,4) ─► L_T = CrossEnt pondérée
-        │              └─► N-Head (GAP→256→logits B,4) ─► L_N = CrossEnt pondérée
-        │                         │
-        │              t_feat + n_feat → Linear(512, d_model) → token_tn (B,1,d)
-        │                         │
-        │   Clinical (B, 22) ─ MLP one-hot (src/clinical_encoder.py) ─► token_clin (B,1,d)
-        │                         │
-        ▼                         ▼
-   ┌──────────────────────────────────────────────┐
-   │           Cross-Attention Fusion              │
-   │           (src/cross_attention.py)            │
-   │  Q = cat([CLS, token_clin, token_tn]) (B,3,d) │
-   │  K = V = Linear(768, d)(bottleneck) (B,64,d)  │
-   │  attn(Q,K,V) → enriched CLS (B, d_model)      │
-   └─────────────────────┬─────────────────────────┘
-                         ▼
-            Survival Head (Discrete-Time, src/heads.py)
-            Linear(d → 256 → T) ; T intervalles = quantiles
-            des temps d'événement du train
-                         │
-            L_Surv = DeepHit (utils/losses.py)
-            calculée UNIQUEMENT sur les patients RFS>0 (survie nettoyée)
+        ├──────────────────────────────┬─────────────────────────────┐
+        ▼                              ▼                             ▼
+  RandomForest T              RandomForest N            RandomSurvivalForest
+  (train_tn.py)               (train_tn.py)             (train_survival.py)
+  class_weight=balanced       class_weight=balanced     cible (event, RFS)
+  → stade T (4 classes)       → stade N (4 classes)     → score de risque
+        │                              │                             │
+   balanced accuracy            balanced accuracy               c-index
+        └──────────── Optuna (val split) ──────────────────────────┘
 
-═══════════════════════════════════════════════════════════════════════════════
-
-LOSS PHASE 2 :  L = w_T·L_T + w_N·L_N + w_Surv·L_Surv
-  • Poids dynamiques par Uncertainty Weighting (Kendall et al.) sur 3 tâches
-  • CrossEntropy T/N pondérées par l'inverse des fréquences de classe
-  • Variables cliniques catégorielles encodées en one-hot (dim 22)
-  • Le backbone reste figé : aucun gradient ne remonte vers le SwinUNETR
-
-═══════════════════════════════════════════════════════════════════════════════
+  • Trois forêts strictement indépendantes, entraînées sur le SEUL embedding image.
+  • T/N : lignes au label connu (>= 0) ; survie : patients à RFS renseigné (> 0).
+  • Modèles sérialisés en .joblib dans checkpoints/.
 ```
 
 ### Exécution
 
 ```bash
-python train_seg.py        # phase 1 : seg + extraction auto des bottlenecks
-python train_clinical.py   # phase 2 : T/N + survie
-# (train.sh enchaîne les deux ; train_seg.py --extract-only ré-extrait sans réentraîner)
+python train_seg.py        # phase 1 : recherche HP segmentation
+python retrain_seg.py      # phase 1 : retrain final, sauvegarde best_model.pth
+python train_tn.py         # phase 2 : extraction auto des embeddings + RandomForest T/N
+python train_survival.py   # phase 2 : RandomSurvivalForest (réutilise les embeddings)
 ```
 
 ---
@@ -106,24 +94,19 @@ python train_clinical.py   # phase 2 : T/N + survie
 ```
 hecktor2026/
 │
-├── train_seg.py                 # Phase 1 : segmentation seule + extraction des bottlenecks
-├── train_clinical.py            # Phase 2 : têtes T/N + survie sur features cachées
+├── train_seg.py                 # Phase 1 : recherche HP segmentation (Optuna)
+├── retrain_seg.py               # Phase 1 : retrain final → best_model.pth
+├── train_tn.py                  # Phase 2 : RandomForest T et N sur embedding figé
+├── train_survival.py            # Phase 2 : RandomSurvivalForest sur embedding figé
 │
 ├── src/
-│   ├── dataset.py               # HECKTORDataset + one-hot clinique + missing values
-│   ├── transforms.py            # MONAI augmentations (flip, noise, intensity)
-│   ├── preprocessing.py         # resampling 2×2×2 mm³, crop 128³
-│   │
-│   ├── swinunetr.py             # SwinUNETRBackbone (MONAI subclass)
-│   │                            # returns (seg_mask, bottleneck) — backbone phase 1
-│   ├── clinical_model.py        # ClinicalModel : bottleneck → logits T/N + survie (phase 2)
-│   ├── heads.py                 # TNHead (returns feat + logits) + SurvivalHead
-│   ├── cross_attention.py       # CrossAttentionFusion
-│   └── clinical_encoder.py     # Clinical MLP (one-hot → 64 → d_model)
+│   ├── image_data.py            # DataModule seg + BottleneckExtractor + ensure_bottlenecks
+│   ├── clinical_data.py         # pool_embedding + EmbeddingDataset (embedding ⊕ cibles T/N/survie)
+│   └── networks.py              # SwinUNETRBackbone : returns (seg_logits, bottleneck)
 │
 ├── utils/
-│   ├── losses.py                # DiceFocal + CrossEntropy + DeepHit
-│   └── metrics.py               # C-index, Dice, Balanced Accuracy
+│   ├── losses.py                # seg_loss = DiceFocal
+│   └── metrics.py               # balanced_accuracy, c_index
 │
-└── config.py                    # d_model, T, N_warmup, lr, batch_size
+└── config.py                    # feature_size, lr, batch_size, n_trials des forêts
 ```

@@ -198,3 +198,14 @@ class BottleneckExtractor:
         print("extracting val split")
         torch.save(self._bottlenecks_of(backbone, val_loader), self.config.val_features_path)
         print(f"features saved to {self.config.features_dir}")
+
+
+def ensure_bottlenecks(config):
+    """Extrait les embeddings TEP/CT figés si les fichiers de features sont absents.
+    Idempotent : partagé par train_tn.py et train_survival.py, n'utilise le GPU
+    que lors de la première extraction."""
+    if os.path.exists(config.train_features_path) and os.path.exists(config.val_features_path):
+        print("bottleneck features already extracted, skipping")
+        return
+    device = torch.device("cuda")
+    BottleneckExtractor(config, device).run()

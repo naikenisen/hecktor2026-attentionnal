@@ -9,13 +9,7 @@ spatial_size = (128, 128, 128)
 feature_size = 48
 use_checkpoint = True
 pretrained_path = "utils/model_swinvit.pt"
-bottleneck_channels = 768
-d_model = 256
-n_heads = 4
-n_clinical_features = 22
-hidden_tn = 256
-n_time_bins = 10
-surv_hidden = 256
+bottleneck_channels = 768   # canaux du bottleneck SwinUNETR (dim de l'embedding avant pooling)
 batch_size = 2
 
 # Segmentation training
@@ -25,12 +19,10 @@ seg_grad_clip_norm = 1.0
 seg_n_trials = 20               # trials par worker (4 workers = 80 trials totaux)
 seg_search_timeout_hours = 6    # mur de temps de la HP search par worker
 
-# Clinical training
-clinical_batch_size = 64
-clinical_epochs = 200
-clinical_grad_clip_norm = 1.0
-clinical_n_trials = 100
-clinical_prune_warmup_epochs = 20
+# Têtes tabulaires sur embedding figé (forêts aléatoires, aucune fusion)
+rf_seed = 42
+tn_n_trials = 50      # trials Optuna par RandomForest T / N
+surv_n_trials = 30    # trials Optuna du RandomSurvivalForest
 use_augmentation = True
 aug_probability = 0.5
 val_split = 0.2
@@ -43,6 +35,8 @@ experiment_dir = os.path.join(output_dir, experiment_name)
 checkpoint_dir = os.path.join(experiment_dir, "checkpoints")
 features_dir = os.path.join(experiment_dir, "features")
 best_seg_path = os.path.join(checkpoint_dir, "best_model.pth")
-best_clinical_path = os.path.join(checkpoint_dir, "best_clinical.pth")
+best_tn_t_path = os.path.join(checkpoint_dir, "tn_t_rf.joblib")
+best_tn_n_path = os.path.join(checkpoint_dir, "tn_n_rf.joblib")
+best_survival_path = os.path.join(checkpoint_dir, "survival_rsf.joblib")
 train_features_path = os.path.join(features_dir, "train.pt")
 val_features_path = os.path.join(features_dir, "val.pt")

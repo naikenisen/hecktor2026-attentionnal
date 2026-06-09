@@ -1,8 +1,8 @@
-#!/bin/ksh 
+#!/bin/ksh
 #$ -q gpu
-#$ -o train_clinical.out
+#$ -o train_tn.out
 #$ -j y
-#$ -N train
+#$ -N train_tn
 
 set -e
 
@@ -27,4 +27,4 @@ export PYTHONPATH="$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH"
 export MPLCONFIGDIR="$TMPDIR/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
-python train_clinical.py
+python train_tn.py
