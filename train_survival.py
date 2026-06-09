@@ -1,8 +1,10 @@
-"""Prédiction de la survie sans rechute par RandomSurvivalForest sur l'embedding TEP/CT.
+"""Prédiction de la survie sans rechute par RandomSurvivalForest sur les données cliniques.
 
-Aucune fusion de données : la forêt de survie est entraînée uniquement sur l'embedding
-du bottleneck SwinUNETR (moyenne + max global), avec pour cible la paire (événement,
-temps de RFS). Recherche Optuna des hyperparamètres sur le c-index de validation."""
+Aucune information image : la forêt de survie est entraînée uniquement sur les variables
+tabulaires du CSV (âge standardisé + one-hot des variables catégorielles : genre, tabac,
+alcool, performance status, statut HPV, traitement). T-stage / N-stage sont exclus (ce sont
+les cibles de train_tn, indisponibles à l'inférence). Cible : la paire (événement, RFS).
+Recherche Optuna des hyperparamètres sur le c-index de validation."""
 import os
 import joblib
 import optuna
@@ -10,8 +12,7 @@ from sksurv.ensemble import RandomSurvivalForest
 from sksurv.util import Surv
 
 import config
-from src.image_data import ensure_bottlenecks
-from src.clinical_data import load_embeddings
+from src.clinical_data import load_clinical_survival
 from utils.metrics import c_index
 
 
@@ -25,8 +26,7 @@ def _build_rsf(params: dict) -> RandomSurvivalForest:
 
 def main():
     os.makedirs(config.checkpoint_dir, exist_ok=True)
-    ensure_bottlenecks(config)
-    train, val = load_embeddings(config)
+    train, val = load_clinical_survival(config)
 
     X_train, t_train, e_train = train.survival()
     X_val, t_val, e_val = val.survival()
@@ -37,7 +37,7 @@ def main():
         params = dict(
             n_estimators=trial.suggest_int("n_estimators", 200, 1000, step=100),
             max_depth=trial.suggest_int("max_depth", 3, 30),
-            max_features=trial.suggest_categorical("max_features", ["sqrt", "log2", 0.3]),
+            max_features=trial.suggest_categorical("max_features", ["sqrt", "log2", 0.5]),
             min_samples_leaf=trial.suggest_int("min_samples_leaf", 2, 15),
         )
         rsf = _build_rsf(params)

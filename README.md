@@ -24,10 +24,10 @@ les têtes neuronales de classification et de survie instables. La pipeline est 
 
 1. **Phase 1** — segmentation SwinUNETR (seule tâche profonde).
 2. **Embedding** — le bottleneck figé de chaque patient est réduit en un vecteur TEP/CT.
-3. **Phase 2** — deux têtes **indépendantes**, chacune une forêt aléatoire entraînée
-   *uniquement* sur cet embedding : un `RandomForest` pour les stades T et N, un
-   `RandomSurvivalForest` pour la survie sans rechute. Aucune variable clinique
-   tabulaire n'est fusionnée à l'image.
+3. **Phase 2** — deux têtes **indépendantes**, sans aucune fusion :
+   - un `RandomForest` (stades T et N) entraîné *uniquement* sur l'embedding TEP/CT ;
+   - un `RandomSurvivalForest` (survie sans rechute) entraîné *uniquement* sur les
+     variables cliniques tabulaires du CSV — l'image n'intervient pas.
 
 ### Phase 1 — Segmentation (`train_seg.py`)
 
@@ -48,34 +48,35 @@ CT+PET (B, 2, 128, 128, 128)
         │
         └──► bottleneck (B, 768, 4, 4, 4)
 
-À la première exécution d'une tâche tabulaire, `ensure_bottlenecks()` recharge
-best_model.pth, GÈLE le backbone, et extrait le bottleneck spatial de CHAQUE patient
-vers experiments/<exp>/features/{train,val}.pt (déterministe, réutilisé ensuite).
+À la première exécution de train_tn.py, `ensure_bottlenecks()` recharge best_model.pth,
+GÈLE le backbone, et extrait le bottleneck spatial de CHAQUE patient vers
+experiments/<exp>/features/{train,val}.pt (déterministe, réutilisé ensuite).
 ```
 
-### Phase 2 — Têtes-forêts sur embedding figé (`train_tn.py`, `train_survival.py`)
+### Phase 2 — Têtes-forêts indépendantes (`train_tn.py`, `train_survival.py`)
 
 ```
-features/{train,val}.pt   (bottlenecks figés, par case_id)
-        │
-        │  pool_embedding : GAP (moyenne) ⊕ max global  →  embedding (N, 2·768)
-        │  (src/clinical_data.py — joint aux cibles T/N/RFS/event par case_id)
-        ▼
-   embedding TEP/CT  (aucune variable clinique fusionnée)
-        │
-        ├──────────────────────────────┬─────────────────────────────┐
-        ▼                              ▼                             ▼
-  RandomForest T              RandomForest N            RandomSurvivalForest
-  (train_tn.py)               (train_tn.py)             (train_survival.py)
-  class_weight=balanced       class_weight=balanced     cible (event, RFS)
-  → stade T (4 classes)       → stade N (4 classes)     → score de risque
-        │                              │                             │
-   balanced accuracy            balanced accuracy               c-index
-        └──────────── Optuna (val split) ──────────────────────────┘
+   EMBEDDING TEP/CT (image)                  DONNÉES CLINIQUES (CSV)
+   features/{train,val}.pt                   HECKTOR_2026_training_data.csv
+        │                                          │
+        │ pool_embedding : moyenne ⊕ max          │ ClinicalEncoder : âge standardisé +
+        │ → embedding (N, 2·768)                   │ one-hot (genre, tabac, alcool,
+        │                                          │ perf. status, HPV, traitement)
+        ▼                                          ▼
+   ┌──────────────┬──────────────┐         RandomSurvivalForest  (train_survival.py)
+   ▼              ▼                         cible (event, RFS) → score de risque
+ RandomForest T   RandomForest N                   │
+ (train_tn.py)    (train_tn.py)                  c-index
+ class_weight=balanced                             │
+ → stade T        → stade N                    Optuna (val)
+   balanced acc     balanced acc
+        └──── Optuna (val) ────┘
 
-  • Trois forêts strictement indépendantes, entraînées sur le SEUL embedding image.
-  • T/N : lignes au label connu (>= 0) ; survie : patients à RFS renseigné (> 0).
-  • Modèles sérialisés en .joblib dans checkpoints/.
+  • Trois forêts strictement indépendantes, AUCUNE fusion image / clinique.
+  • T/N : embedding image seul, lignes au label connu (>= 0).
+  • Survie : variables cliniques seules (T/N-stage exclus — ce sont les cibles, non
+    disponibles à l'inférence) ; patients à RFS renseigné (> 0).
+  • Split train/val partagé avec la pipeline image (même seed) ; modèles en .joblib.
 ```
 
 ### Exécution
@@ -101,7 +102,7 @@ hecktor2026/
 │
 ├── src/
 │   ├── image_data.py            # DataModule seg + BottleneckExtractor + ensure_bottlenecks
-│   ├── clinical_data.py         # pool_embedding + EmbeddingDataset (embedding ⊕ cibles T/N/survie)
+│   ├── clinical_data.py         # embedding (T/N) + encodeur clinique & survie (RFS)
 │   └── networks.py              # SwinUNETRBackbone : returns (seg_logits, bottleneck)
 │
 ├── utils/

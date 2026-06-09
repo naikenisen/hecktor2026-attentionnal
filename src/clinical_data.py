@@ -79,3 +79,110 @@ def load_embeddings(config) -> tuple[EmbeddingDataset, EmbeddingDataset]:
     val = EmbeddingDataset(val_features, patients)
     print(f"loaded {len(train)} train and {len(val)} val embeddings (dim {train.X.shape[1]})")
     return train, val
+
+
+# ─────────────────────────── Survie sur données cliniques ───────────────────────────
+# La survie n'utilise AUCUNE information image : seulement les variables tabulaires du
+# CSV. T-stage / N-stage sont exclus (ce sont les cibles de train_tn et ils ne sont pas
+# disponibles à l'inférence).
+
+AGE_COLUMN = "Age"
+CATEGORICAL_COLUMNS = [
+    "Gender",
+    "Tobacco Consumption",
+    "Alcohol Consumption",
+    "Performance Status",
+    "HPV Status",
+    "Treatment",
+]
+UNKNOWN_CATEGORY = "Inconnu"
+
+
+class ClinicalEncoder:
+    """Apprend sur le train les statistiques d'âge et les catégories observées, puis
+    transforme chaque patient en vecteur numérique (âge standardisé + one-hot).
+    Les valeurs manquantes tombent dans une catégorie « Inconnu » dédiée (âge imputé
+    par la médiane du train)."""
+
+    def __init__(self):
+        self.age_mean = 0.0
+        self.age_std = 1.0
+        self.age_median = 0.0
+        self.category_indices = {}
+
+    def fit(self, patients: pd.DataFrame):
+        ages = patients[AGE_COLUMN].dropna().to_numpy(dtype=float)
+        if len(ages):
+            self.age_median = float(np.median(ages))
+            self.age_mean = float(ages.mean())
+            self.age_std = float(ages.std()) if ages.std() > 1e-6 else 1.0
+        for column in CATEGORICAL_COLUMNS:
+            values = patients[column].dropna().astype(str).unique().tolist()
+            if UNKNOWN_CATEGORY not in values:
+                values.append(UNKNOWN_CATEGORY)
+            self.category_indices[column] = {value: i for i, value in enumerate(sorted(values))}
+        return self
+
+    @property
+    def output_dim(self) -> int:
+        return 1 + sum(len(indices) for indices in self.category_indices.values())
+
+    def encode_row(self, row: pd.Series) -> np.ndarray:
+        age = row.get(AGE_COLUMN, np.nan)
+        age = self.age_median if pd.isna(age) else float(age)
+        features = [(age - self.age_mean) / self.age_std]
+        for column, indices in self.category_indices.items():
+            value = row.get(column, np.nan)
+            value = UNKNOWN_CATEGORY if pd.isna(value) else str(value)
+            position = indices.get(value, indices[UNKNOWN_CATEGORY])
+            one_hot = [0.0] * len(indices)
+            one_hot[position] = 1.0
+            features.extend(one_hot)
+        return np.array(features, dtype=np.float32)
+
+
+class ClinicalSurvivalDataset:
+    """Variables cliniques encodées d'un split, alignées par case_id avec (temps, événement)
+    de survie sans rechute. Aucune donnée image."""
+
+    def __init__(self, case_ids: list, patients: pd.DataFrame, encoder: ClinicalEncoder):
+        rows = patients.set_index("PatientID")
+        features, time, event, kept = [], [], [], []
+        for case_id in case_ids:
+            if case_id not in rows.index:
+                continue
+            row = rows.loc[case_id]
+            features.append(encoder.encode_row(row))
+            relapse_free_survival = row.get("RFS", np.nan)
+            time.append(float(relapse_free_survival) if not pd.isna(relapse_free_survival) else 0.0)
+            relapse = row.get("Relapse", np.nan)
+            event.append(int(relapse) if not pd.isna(relapse) else 0)
+            kept.append(case_id)
+        self.case_ids = kept
+        self.X = np.stack(features) if features else np.empty((0, encoder.output_dim), np.float32)
+        self.time = np.array(time, dtype=np.float64)
+        self.event = np.array(event, dtype=np.int64)
+
+    def __len__(self) -> int:
+        return self.X.shape[0]
+
+    def survival(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Sous-ensemble (X, time, event) des patients dont le RFS est renseigné (> 0)."""
+        mask = self.time > 0
+        return self.X[mask], self.time[mask], self.event[mask].astype(bool)
+
+
+def load_clinical_survival(config) -> tuple[ClinicalSurvivalDataset, ClinicalSurvivalDataset]:
+    """Construit les jeux de survie cliniques train/val. Le split réutilise exactement
+    celui de la pipeline image (PetCtDataModule, CPU seul) pour rester cohérent avec
+    train_tn, mais aucune image n'est chargée ici. L'encodeur est ajusté sur le train."""
+    from src.image_data import PetCtDataModule  # source unique du split, sans extraction GPU
+    splitter = PetCtDataModule(config)
+    patients = pd.read_csv(config.csv_path)
+    train_patients = patients[patients["PatientID"].isin(splitter.train_ids)]
+    encoder = ClinicalEncoder().fit(train_patients)
+    train = ClinicalSurvivalDataset(splitter.train_ids, patients, encoder)
+    val = ClinicalSurvivalDataset(splitter.val_ids, patients, encoder)
+    print(f"loaded clinical features (dim {encoder.output_dim}): "
+          f"{len(train)} train / {len(val)} val patients")
+    return train, val
