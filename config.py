@@ -1,10 +1,10 @@
 import os
-data_root = "/work/imvia/in156281/datasets/hecktor_dataset_preprocessed"
+data_root = "/work/imvia/in156281/datasets/hecktor_dataset_preprocessed_suv"
 csv_path = "/work/imvia/in156281/datasets/hecktor_dataset/HECKTOR_2026_training_data.csv"
 input_channels = 2
 num_seg_classes = 3
 num_t_classes = 4
-num_n_classes = 3
+num_n_classes = 4   # N0, N1, N2, N3 (cf. N_STAGES dans clinical_data.py)
 spatial_size = (128, 128, 128)
 feature_size = 48
 use_checkpoint = True

@@ -125,8 +125,10 @@ class ClinicalDataModule:
         self.val = None
 
     def setup(self):
-        train_features = torch.load(self.config.train_features_path, map_location="cpu")
-        val_features = torch.load(self.config.val_features_path, map_location="cpu")
+        # weights_only=False : fichiers de features produits par notre propre pipeline
+        # (BottleneckExtractor), source de confiance. Indispensable sous PyTorch >= 2.6.
+        train_features = torch.load(self.config.train_features_path, map_location="cpu", weights_only=False)
+        val_features = torch.load(self.config.val_features_path, map_location="cpu", weights_only=False)
         train_patients = self.patients[self.patients["PatientID"].isin(train_features["case_id"])]
         self.encoder.fit(train_patients)
         self.train = ClinicalDataset.from_bottlenecks(train_features, self.patients, self.encoder)

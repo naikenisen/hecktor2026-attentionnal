@@ -98,6 +98,7 @@ class ClinicalTrainer:
 
     def fit(self, trial, global_best) -> float:
         trial_best_score = 0.0
+        trial_best_c_index = 0.0
         for epoch in range(self.config.clinical_epochs):
             train_loss = self.train_epoch()
             metrics = self.evaluate()
@@ -108,6 +109,8 @@ class ClinicalTrainer:
 
             if score > trial_best_score:
                 trial_best_score = score
+                trial_best_c_index = metrics["c_index"]
+                trial.set_user_attr("c_index", trial_best_c_index)
             if score > global_best["score"]:
                 global_best["score"] = score
                 torch.save(self.model.state_dict(), self.config.best_clinical_path)
@@ -149,6 +152,7 @@ def main():
     )
 
     print(f"best score {study.best_value:.4f}")
+    print(f"best c-index {study.best_trial.user_attrs['c_index']:.4f}")
     print(f"best params {study.best_params}")
 
 

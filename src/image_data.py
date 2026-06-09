@@ -2,6 +2,11 @@ import os
 import random
 import torch
 import pandas as pd
+
+# Les workers du DataLoader partagent les tensors via des file descriptors par défaut ;
+# sur de gros volumes bimodaux on épuise vite `ulimit -n` (RuntimeError: received 0 items
+# of ancdata). On bascule sur le partage par mémoire partagée (/dev/shm).
+torch.multiprocessing.set_sharing_strategy("file_system")
 from tqdm import tqdm
 from monai.data import CacheDataset, DataLoader
 from monai.transforms import (
@@ -177,7 +182,9 @@ class BottleneckExtractor:
         for batch in tqdm(loader, desc="Extract", leave=False):
             images = batch["image"].to(self.device, non_blocking=True)
             _, bottleneck = backbone(images)
-            bottlenecks.append(bottleneck.float().cpu())
+            # .as_tensor() retire les métadonnées MONAI (MetaTensor) : le fichier de
+            # features reste un torch.Tensor pur, chargeable avec weights_only=True.
+            bottlenecks.append(bottleneck.as_tensor().float().cpu())
             case_ids.extend(batch["case_id"])
         return {"bottleneck": torch.cat(bottlenecks), "case_id": case_ids}
 
