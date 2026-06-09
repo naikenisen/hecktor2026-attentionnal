@@ -29,7 +29,7 @@ neuronales de classification et de survie instables. La pipeline est donc
    - un `RandomSurvivalForest` (survie sans rechute) entraîné *uniquement* sur les
      variables cliniques tabulaires du CSV — l'image n'intervient pas.
 
-### Phase 1 — Segmentation nnU-Net (`train_seg.py`)
+### Phase 1 — Segmentation nnU-Net (paquet `seg`)
 
 La segmentation repose désormais sur **nnU-Net v2**, piloté par le `nnUNetV2Runner` de
 MONAI (paquet `nnunetv2`). nnU-Net est auto-configurant : il dérive patch size, batch size,
@@ -39,7 +39,7 @@ recherche d'hyperparamètres Optuna ni de retrain séparé**.
 ```
   CT+PET (RAW, déjà prétraités en SUV)
         │
-        │ train_seg.py construit l'arborescence brute nnU-Net via liens symboliques :
+        │ seg.dataset construit l'arborescence brute nnU-Net via liens symboliques :
         │   imagesTr/<case>_0000.nii.gz → CT     (canal 0)
         │   imagesTr/<case>_0001.nii.gz → PET    (canal 1)
         │   labelsTr/<case>.nii.gz      → masque (0=fond, 1=GTVp, 2=GTVn)
@@ -56,13 +56,13 @@ recherche d'hyperparamètres Optuna ni de retrain séparé**.
   → experiments/<exp>/nnunet/nnUNet_results/Dataset001_HECKTOR/...
 ```
 
-À la première exécution de `train_tn.py`, `ensure_bottlenecks()` (`NNUNetBottleneckExtractor`)
+À la première exécution de `tn.train`, `ensure_bottlenecks()` (`NNUNetBottleneckExtractor`)
 recharge le modèle nnU-Net entraîné, **GÈLE son encodeur**, prétraite chaque patient *via
 nnU-Net lui-même* (resampling + normalisation par canal), recadre au patch du plan, et
 sauvegarde le **bottleneck du dernier étage d'encodage** vers
 `experiments/<exp>/features/{train,val}.pt` (déterministe, réutilisé ensuite).
 
-### Phase 2 — Têtes-forêts indépendantes (`train_tn.py`, `train_survival.py`)
+### Phase 2 — Têtes-forêts indépendantes (paquets `tn`, `survival`)
 
 ```
    EMBEDDING TEP/CT (image)                  DONNÉES CLINIQUES (CSV)
@@ -72,10 +72,10 @@ sauvegarde le **bottleneck du dernier étage d'encodage** vers
         │ → embedding (N, 2·C_enc)                 │ one-hot (genre, tabac, alcool,
         │                                          │ perf. status, HPV, traitement)
         ▼                                          ▼
-   ┌──────────────┬──────────────┐         RandomSurvivalForest  (train_survival.py)
+   ┌──────────────┬──────────────┐         RandomSurvivalForest  (survival.train)
    ▼              ▼                         cible (event, RFS) → score de risque
  RandomForest T   RandomForest N                   │
- (train_tn.py)    (train_tn.py)                  c-index
+   (tn.train)       (tn.train)                    c-index
  class_weight=balanced                             │
  → stade T        → stade N                    Optuna (val)
    balanced acc     balanced acc
@@ -90,13 +90,16 @@ sauvegarde le **bottleneck du dernier étage d'encodage** vers
 
 ### Exécution
 
+Chaque tâche est un paquet, lancé comme module **depuis la racine du dépôt** (les `.sh`
+associés restent à la racine et font `cd` dans le projet avant d'appeler ces commandes) :
+
 ```bash
-python train_seg.py        # phase 1 : segmentation nnU-Net (auto-configurant, fold 0)
-python train_tn.py         # phase 2 : extraction auto des embeddings + RandomForest T/N
-python train_survival.py   # phase 2 : RandomSurvivalForest sur données cliniques (CSV)
+python -m seg.train        # phase 1 : segmentation nnU-Net (auto-configurant, fold 0)
+python -m tn.train         # phase 2 : extraction auto des embeddings + RandomForest T/N
+python -m survival.train   # phase 2 : RandomSurvivalForest sur données cliniques (CSV)
 ```
 
-### Variante survie — embedding CT du modèle de fondation CT-FM (`train_foundation_survival.py`)
+### Variante survie — embedding CT du modèle de fondation CT-FM (`foundation_survival`)
 
 Approche indépendante des phases ci-dessus : la survie est prédite uniquement à partir
 de la **CT**, encodée par le modèle de fondation **CT-FM**
@@ -109,28 +112,46 @@ restent ceux des autres têtes. L'extraction (GPU) est mise en cache dans
 `experiments/<exp>/features/ct_fm_{train,val}.pt` et réutilisée ensuite.
 
 ```bash
-pip install lighter_zoo               # dépendance du modèle de fondation
-python train_foundation_survival.py   # extraction CT-FM (cache) + RandomSurvivalForest
+pip install lighter_zoo                   # dépendance du modèle de fondation
+python -m foundation_survival.train       # extraction CT-FM (cache) + RandomSurvivalForest
 ```
 
 ---
 
 ## Repository structure
 
+Le code est séparé en un paquet par tâche (`seg`, `tn`, `survival`, `foundation_survival`).
+Les `.sh` de soumission restent à la racine. `src/` et `utils/` regroupent le code partagé.
+
 ```
 hecktor2026/
 │
-├── train_seg.py                 # Phase 1 : segmentation nnU-Net (MONAI nnUNetV2Runner)
-├── train_tn.py                  # Phase 2 : RandomForest T et N sur embedding figé
-├── train_survival.py            # Phase 2 : RandomSurvivalForest sur données cliniques
-├── train_foundation_survival.py # Variante : RandomSurvivalForest sur embedding CT-FM (CT seule)
+├── seg/                         # Phase 1 — segmentation nnU-Net
+│   ├── __init__.py              #   fixe les variables d'env nnU-Net (avant tout import nnunetv2)
+│   ├── dataset.py               #   arborescence brute (liens symboliques) + dataset.json + split
+│   ├── runner.py                #   pilotage du nnUNetV2Runner (plan/preprocess/train/Dice)
+│   └── train.py                 #   point d'entrée  →  python -m seg.train
+│
+├── tn/                          # Phase 2 — stades T et N (RandomForest sur embedding figé)
+│   ├── forest.py                #   RandomForestClassifier + recherche Optuna (balanced acc)
+│   └── train.py                 #   point d'entrée  →  python -m tn.train
+│
+├── survival/                    # Phase 2 — survie RFS (RandomSurvivalForest, données cliniques)
+│   └── train.py                 #   point d'entrée  →  python -m survival.train
+│
+├── foundation_survival/         # Variante — survie RFS sur embedding CT-FM (CT seule)
+│   ├── extractor.py             #   extraction des features CT-FM (SegResNet pré-entraîné)
+│   ├── dataset.py               #   alignement embedding ↔ cible de survie
+│   └── train.py                 #   point d'entrée  →  python -m foundation_survival.train
 │
 ├── src/
 │   ├── image_data.py            # split patients + NNUNetBottleneckExtractor + ensure_bottlenecks
 │   └── clinical_data.py         # embedding (T/N) + encodeur clinique & survie (RFS)
 │
 ├── utils/
-│   └── metrics.py               # balanced_accuracy, c_index
+│   ├── metrics.py               # balanced_accuracy, c_index
+│   └── survival_forest.py       # RandomSurvivalForest + Optuna, partagé survival/foundation
 │
+├── train_seg.sh / train_tn.sh / train_survival.sh / train_foundation_survival.sh
 └── config.py                    # réglages nnU-Net, split, chemins, n_trials des forêts
 ```

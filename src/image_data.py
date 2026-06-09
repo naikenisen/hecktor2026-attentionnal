@@ -110,8 +110,8 @@ class NNUNetBottleneckExtractor:
 
 def ensure_bottlenecks(config):
     """Extrait les embeddings du bottleneck de l'encodeur nnU-Net si les fichiers de
-    features sont absents. Idempotent : partagé par train_tn.py et train_survival.py,
-    n'utilise le GPU que lors de la première extraction."""
+    features sont absents. Idempotent (utilisé par `tn.train`) : n'utilise le GPU que lors
+    de la première extraction."""
     if os.path.exists(config.train_features_path) and os.path.exists(config.val_features_path):
         print("bottleneck features already extracted, skipping")
         return

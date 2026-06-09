@@ -43,7 +43,7 @@ def pool_embedding(bottleneck: torch.Tensor) -> np.ndarray:
 
 class EmbeddingDataset:
     """Embedding TEP/CT figé d'un split, aligné par case_id avec ses cibles de stade T/N.
-    Alimente les RandomForest de train_tn.py (la survie passe par les données cliniques)."""
+    Alimente les RandomForest de `tn.train` (la survie passe par les données cliniques)."""
 
     def __init__(self, features: dict, patients: pd.DataFrame):
         rows = patients.set_index("PatientID")

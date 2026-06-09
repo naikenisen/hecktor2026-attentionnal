@@ -27,4 +27,4 @@ export PYTHONPATH="$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH"
 export MPLCONFIGDIR="$TMPDIR/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
-python train_survival.py
+python -m survival.train

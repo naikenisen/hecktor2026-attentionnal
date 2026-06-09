@@ -29,4 +29,4 @@ export MPLCONFIGDIR="$TMPDIR/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
 # Phase 1 : segmentation nnU-Net (conversion + plan_and_process + entraînement fold 0)
-python train_seg.py
+python -m seg.train
