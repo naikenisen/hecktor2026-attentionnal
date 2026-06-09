@@ -36,4 +36,4 @@ __pycache__/
 tensorboard_logs/
 runs/
 dataset/
-resuts/
+results/
