@@ -8,7 +8,7 @@ Lancement (depuis la racine du dépôt) :
 Contrairement à `survival` (variables cliniques) et `tn` (embedding TEP/CT de la segmentation),
 cette tête n'utilise QUE la CT, encodée par le modèle de fondation CT-FM. Le split train/val
 réutilise exactement celui de la pipeline image (`split_case_ids`). La forêt et la recherche
-Optuna (c-index) sont mutualisées dans `src.survival_forest`.
+aléatoire validée par CV (c-index) sont mutualisées dans `src.survival_forest`.
 """
 import os
 import joblib

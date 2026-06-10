@@ -17,7 +17,7 @@ nnunet_gpu_memory_gb = 8                        # cible mémoire de l'experiment
 # Têtes tabulaires sur embedding figé (forêts aléatoires, aucune fusion)
 rf_seed = 42
 tn_n_trials = 50      # trials Optuna par RandomForest T / N
-surv_n_trials = 30    # trials Optuna du RandomSurvivalForest
+surv_n_trials = 30    # itérations RandomizedSearchCV (CV K-fold) du RandomSurvivalForest
 val_split = 0.2
 seed = 42
 num_workers = 4

@@ -6,7 +6,7 @@ Lancement (depuis la racine du dépôt) :
 
 Même source d'embedding que `tn` (bottleneck de l'encodeur nnU-Net, extrait une seule fois
 puis mis en cache), mais cible de survie (événement, RFS) au lieu des stades T/N. La forêt
-et la recherche Optuna (c-index) sont mutualisées dans `src.survival_forest`.
+et la recherche aléatoire validée par CV (c-index) sont mutualisées dans `src.survival_forest`.
 """
 import os
 import joblib

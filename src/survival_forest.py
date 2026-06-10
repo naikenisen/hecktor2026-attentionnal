@@ -1,41 +1,49 @@
-"""RandomSurvivalForest + recherche Optuna sur le c-index de validation.
+"""RandomSurvivalForest + recherche aléatoire (RandomizedSearchCV) validée par CV.
 
-Partagé par les deux têtes de survie (variables cliniques et embedding CT-FM) : elles ne
-diffèrent que par la source des features, pas par la forêt ni la grille d'hyperparamètres.
+Partagé par les trois têtes de survie (variables cliniques, embedding nnU-Net, embedding
+CT-FM) : elles ne diffèrent que par la source des features, pas par la forêt ni la grille
+d'hyperparamètres.
+
+Sélection par validation croisée K-fold sur le train (score par défaut du RSF = concordance
+de Harrell), pas sur un unique split de validation : avec les petites cohortes HECKTOR, le
+c-index d'un seul split est trop bruité pour sélectionner sans surajuster ce split. Le split
+de validation reste tenu à l'écart de la recherche et ne sert qu'au report d'un c-index
+honnête.
 """
-import optuna
+from sklearn.model_selection import KFold, RandomizedSearchCV
 from sksurv.ensemble import RandomSurvivalForest
 
 import config
 from src.metrics import c_index
 
+# Même espace que la grille Optuna précédente (~10 000 combinaisons) ; RandomizedSearchCV en
+# échantillonne n_iter au hasard, ce qui couvre mieux qu'un grid exhaustif borné en budget.
+_PARAM_DISTRIBUTIONS = {
+    "n_estimators": list(range(200, 1001, 100)),
+    "max_depth": list(range(3, 31)),
+    "max_features": ["sqrt", "log2", 0.5],
+    "min_samples_leaf": list(range(2, 16)),
+}
 
-def _build_rsf(params: dict) -> RandomSurvivalForest:
-    return RandomSurvivalForest(random_state=config.rf_seed, n_jobs=-1, **params)
 
-
-def search_rsf(X_train, y_train, X_val, t_val, e_val, n_trials: int) -> tuple:
-    """Recherche Optuna des hyperparamètres du RSF sur le c-index de validation, puis
-    réentraîne le meilleur modèle sur le train. Retourne (modèle, c-index, params)."""
-    def objective(trial) -> float:
-        params = dict(
-            n_estimators=trial.suggest_int("n_estimators", 200, 1000, step=100),
-            max_depth=trial.suggest_int("max_depth", 3, 30),
-            max_features=trial.suggest_categorical("max_features", ["sqrt", "log2", 0.5]),
-            min_samples_leaf=trial.suggest_int("min_samples_leaf", 2, 15),
-        )
-        rsf = _build_rsf(params)
-        rsf.fit(X_train, y_train)
-        # RSF.predict renvoie un score de risque (croissant avec le risque) :
-        # c_index attend un score de risque et applique lui-même la négation.
-        return c_index(rsf.predict(X_val), t_val, e_val.astype(float))
-
-    study = optuna.create_study(
-        direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=config.rf_seed),
+def search_rsf(X_train, y_train, X_val, t_val, e_val, n_iter: int) -> tuple:
+    """Recherche aléatoire des hyperparamètres du RSF, sélectionnés par CV K-fold sur le
+    c-index, puis réentraîne le meilleur modèle sur tout le train. Le split de validation,
+    hors sélection, fournit le c-index reporté. Retourne (modèle, c-index val, params)."""
+    search = RandomizedSearchCV(
+        estimator=RandomSurvivalForest(random_state=config.rf_seed, n_jobs=-1),
+        param_distributions=_PARAM_DISTRIBUTIONS,
+        n_iter=n_iter,
+        # scoring=None → score par défaut du RSF = concordance de Harrell (c-index)
+        cv=KFold(n_splits=5, shuffle=True, random_state=config.rf_seed),
+        random_state=config.rf_seed,
+        refit=True,   # réentraîne le meilleur modèle sur tout le train
+        n_jobs=1,     # parallélisme déjà porté par la forêt (n_jobs=-1) : pas de sur-souscription
     )
-    study.optimize(objective, n_trials=n_trials)
+    search.fit(X_train, y_train)
 
-    best = _build_rsf(study.best_params)
-    best.fit(X_train, y_train)
-    return best, study.best_value, study.best_params
+    best = search.best_estimator_
+    # RSF.predict renvoie un score de risque (croissant avec le risque) :
+    # c_index attend un score de risque et applique lui-même la négation.
+    val_c = c_index(best.predict(X_val), t_val, e_val.astype(float))
+    return best, val_c, search.best_params_
