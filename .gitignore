@@ -23,6 +23,11 @@ Task1/experiments/
 */data/
 *_data/
 
+# Experiments (modèles entraînés, données générées)
+experiments/
+*.joblib
+*.pkl
+
 # Logs and temporary files
 *.log
 __pycache__/
