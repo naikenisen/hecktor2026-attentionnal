@@ -1,6 +1,7 @@
 import os
 data_root = "/work/imvia/in156281/datasets/hecktor_dataset_preprocessed_suv"
 csv_path = "/work/imvia/in156281/datasets/hecktor_dataset/HECKTOR_2026_training_data.csv"
+csv_path_local="/home/naiken/coding/hecktor2026-attentionnal/dataset/HECKTOR_2026_training_data.csv"
 
 # Segmentation nnU-Net (MONAI nnUNetV2Runner + paquet nnunetv2) — phase 1
 nnunet_dataset_id = 1                          # → Dataset001_HECKTOR
@@ -29,6 +30,8 @@ features_dir = os.path.join(experiment_dir, "features")
 best_tn_t_path = os.path.join(checkpoint_dir, "tn_t_rf.joblib")
 best_tn_n_path = os.path.join(checkpoint_dir, "tn_n_rf.joblib")
 best_survival_path = os.path.join(checkpoint_dir, "survival_rsf.joblib")
+best_survival_tn_path = os.path.join(checkpoint_dir, "survival_rsf_with_tn.joblib")
+clinical_clean_csv_path = os.path.join(experiment_dir, "clinical_clean.csv")
 best_nnunet_survival_path = os.path.join(checkpoint_dir, "survival_nnunet_rsf.joblib")
 train_features_path = os.path.join(features_dir, "train.pt")
 val_features_path = os.path.join(features_dir, "val.pt")
