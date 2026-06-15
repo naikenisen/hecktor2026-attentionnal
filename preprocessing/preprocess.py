@@ -200,7 +200,7 @@ def main() -> None:
     #Bq to SUV conversion (if needed)
     bq_to_suv(
         input_root=str(input_dir),
-        headers_csv= r"suv_conversion_tags.csv",
+        headers_csv= "/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/preprocessing/suv_conversion_tags.csv",
         output_root=str(input_dir),)
     #End of Bq to SUV conversion
     
