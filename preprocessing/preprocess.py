@@ -192,8 +192,8 @@ def process_patient(args):
         return pid, exc
 
 def main() -> None:
-    input_dir  = Path("/work/imvia/in156281/datasets/hecktor_dataset")
-    output_dir = Path("/work/imvia/in156281/datasets/hecktor_dataset_preprocessed_suv")
+    input_dir  = Path("/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset-hecktor/HECKTOR 2026 Training Data")
+    output_dir = Path("/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset-hecktor/hecktor_dataset_suv")
     max_workers = max(1, multiprocessing.cpu_count() // 2)
     n_workers   = max_workers
 

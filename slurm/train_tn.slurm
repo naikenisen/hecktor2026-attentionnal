@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=embe_224     # nom du job
-#SBATCH --output=embe_224.out  # fichier de sortie (%j = job ID)
-#SBATCH --error=embe_224.err   # fichier d'erreur (%j = job ID)
+#SBATCH --job-name=train_tn     # nom du job
+#SBATCH --output=train_tn.out  # fichier de sortie (%j = job ID)
+#SBATCH --error=train_tn.err   # fichier d'erreur (%j = job ID)
 #SBATCH --constraint=h100               # demander des GPU H100 80 Go
 #SBATCH --nodes=1                       # reserver 1 noeud
 #SBATCH --ntasks=1                      # 1 tache shell (les shards sont des sous-processus)

@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=embe_224     # nom du job
-#SBATCH --output=embe_224.out  # fichier de sortie (%j = job ID)
-#SBATCH --error=embe_224.err   # fichier d'erreur (%j = job ID)
+#SBATCH --job-name=train_nnunet_survival     # nom du job
+#SBATCH --output=train_nnunet_survival.out  # fichier de sortie (%j = job ID)
+#SBATCH --error=train_nnunet_survival.err   # fichier d'erreur (%j = job ID)
 #SBATCH --constraint=h100               # demander des GPU H100 80 Go
 #SBATCH --nodes=1                       # reserver 1 noeud
 #SBATCH --ntasks=1                      # 1 tache shell (les shards sont des sous-processus)
@@ -18,6 +18,9 @@ module load pytorch-gpu/py3/2.4.0
 
 source /lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/hecktor_venv/bin/activate
 export PYTHONPATH=/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/hecktor_venv/lib/python3.12.7/site-packages:$PYTHONPATH
+
+export MPLCONFIGDIR="$TMPDIR/matplotlib"
+mkdir -p "$MPLCONFIGDIR"
 
 set -x
 
