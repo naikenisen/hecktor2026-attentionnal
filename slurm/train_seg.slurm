@@ -24,4 +24,4 @@ mkdir -p "$MPLCONFIGDIR"
 
 set -x
 
-python -m seg.train
+python -m /lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/seg/train.py
