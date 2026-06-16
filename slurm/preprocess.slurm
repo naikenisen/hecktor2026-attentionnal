@@ -19,8 +19,18 @@ module load pytorch-gpu/py3/2.4.0
 source /lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/hecktor_venv/bin/activate
 export PYTHONPATH=/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/hecktor_venv/lib/python3.12.7/site-packages:$PYTHONPATH
 
+export MPLCONFIGDIR="$TMPDIR/matplotlib"
+mkdir -p "$MPLCONFIGDIR"
+
+# Remove system cuDNN from LD_LIBRARY_PATH so PyTorch uses its bundled version
+export LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v 'cudnn' | tr '\n' ':' | sed 's/:$//')
+
+# Disable torch.compile (Triton JIT fails on this cluster due to missing libcuda.so.1 in gcc -L paths)
+export TORCH_COMPILE_DISABLE=1
+
 set -x
 
-python /lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/preprocessing/preprocess.py
+cd /lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal
+python preprocessing/preprocess.py
 
 

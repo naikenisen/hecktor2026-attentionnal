@@ -21,6 +21,13 @@ export PYTHONPATH=/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionna
 export MPLCONFIGDIR="$TMPDIR/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
+# Remove system cuDNN from LD_LIBRARY_PATH so PyTorch uses its bundled version
+export LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v 'cudnn' | tr '\n' ':' | sed 's/:$//')
+
+# Disable torch.compile (Triton JIT fails on this cluster due to missing libcuda.so.1 in gcc -L paths)
+export TORCH_COMPILE_DISABLE=1
+
 set -x
 
+cd /lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal
 python -m clinical_survival.train
