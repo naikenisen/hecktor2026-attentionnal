@@ -25,8 +25,8 @@ mkdir -p "$MPLCONFIGDIR"
 # Remove system cuDNN from LD_LIBRARY_PATH so PyTorch uses its bundled version
 export LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v 'cudnn' | tr '\n' ':' | sed 's/:$//')
 
-# Add CUDA stubs so Triton can link libcuda.so.1 at JIT compile time
-export LD_LIBRARY_PATH="$CUDA_HOME/lib64/stubs:$LD_LIBRARY_PATH"
+# Disable torch.compile (Triton JIT fails on this cluster due to missing libcuda.so.1 in gcc -L paths)
+export TORCH_COMPILE_DISABLE=1
 
 set -x
 
