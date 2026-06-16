@@ -22,9 +22,8 @@ export PYTHONPATH=/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionna
 export MPLCONFIGDIR="$TMPDIR/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
-# Prioritize PyTorch's bundled cuDNN over the system one loaded by the module
-TORCH_LIB=$(python -c "import torch, os; print(os.path.dirname(torch.__file__))")/lib
-export LD_LIBRARY_PATH="$TORCH_LIB:${LD_LIBRARY_PATH}"
+# Remove system cuDNN from LD_LIBRARY_PATH so PyTorch uses its bundled version
+export LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v 'cudnn' | tr '\n' ':' | sed 's/:$//')
 
 set -x
 
