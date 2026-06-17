@@ -10,11 +10,24 @@ c-index d'un seul split est trop bruité pour sélectionner sans surajuster ce s
 de validation reste tenu à l'écart de la recherche et ne sert qu'au report d'un c-index
 honnête.
 """
-from sklearn.model_selection import KFold, RandomizedSearchCV
+from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV
 from sksurv.ensemble import RandomSurvivalForest
 
 import config
 from src.metrics import c_index
+
+
+class _SurvivalStratifiedKFold:
+    """KFold stratifié sur l'indicateur d'événement extrait d'un structured array sksurv.
+    Garantit qu'aucun fold ne contient uniquement des patients censurés."""
+    def __init__(self, n_splits=5, shuffle=True, random_state=None):
+        self._kf = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
+
+    def split(self, X, y, groups=None):
+        return self._kf.split(X, y["event"])
+
+    def get_n_splits(self, X=None, y=None, groups=None):
+        return self._kf.n_splits
 
 # Même espace que la grille Optuna précédente (~10 000 combinaisons) ; RandomizedSearchCV en
 # échantillonne n_iter au hasard, ce qui couvre mieux qu'un grid exhaustif borné en budget.
@@ -35,7 +48,7 @@ def search_rsf(X_train, y_train, X_val, t_val, e_val, n_iter: int) -> tuple:
         param_distributions=_PARAM_DISTRIBUTIONS,
         n_iter=n_iter,
         # scoring=None → score par défaut du RSF = concordance de Harrell (c-index)
-        cv=KFold(n_splits=5, shuffle=True, random_state=config.rf_seed),
+        cv=_SurvivalStratifiedKFold(n_splits=5, shuffle=True, random_state=config.rf_seed),
         random_state=config.rf_seed,
         refit=True,   # réentraîne le meilleur modèle sur tout le train
         n_jobs=1,     # parallélisme déjà porté par la forêt (n_jobs=-1) : pas de sur-souscription
