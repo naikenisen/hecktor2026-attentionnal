@@ -48,7 +48,8 @@ def search_rsf(X_train, y_train, X_val, t_val, e_val, n_iter: int) -> tuple:
         param_distributions=_PARAM_DISTRIBUTIONS,
         n_iter=n_iter,
         # scoring=None → score par défaut du RSF = concordance de Harrell (c-index)
-        cv=_SurvivalStratifiedKFold(n_splits=5, shuffle=True, random_state=config.rf_seed),
+        cv=_SurvivalStratifiedKFold(n_splits=3, shuffle=True, random_state=config.rf_seed),
+        error_score=0.0,  # fold sans événement → score 0 plutôt que nan pour ne pas invalider toute la combinaison
         random_state=config.rf_seed,
         refit=True,   # réentraîne le meilleur modèle sur tout le train
         n_jobs=1,     # parallélisme déjà porté par la forêt (n_jobs=-1) : pas de sur-souscription
