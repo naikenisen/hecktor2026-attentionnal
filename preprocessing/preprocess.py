@@ -152,19 +152,45 @@ def apply_monai_transforms(ct_sitk: sitk.Image,
     lbl_proc = out["label"] if lbl_sitk is not None else None
     return ct_proc, pet_proc, lbl_proc, meta
 
+def _find_modality_file(pdir: Path, pid: str, modality: str) -> Path | None:
+    """Find CT or PT nifti file trying multiple naming conventions."""
+    patterns = [
+        f"{pid}__{modality}.nii.gz",
+        f"{pid}_{modality}.nii.gz",
+        f"{pid}__{modality.lower()}.nii.gz",
+        f"{pid}_{modality.lower()}.nii.gz",
+    ]
+    for pat in patterns:
+        p = pdir / pat
+        if p.exists():
+            return p
+    # Fall back: any nifti in the dir containing the modality tag
+    for p in pdir.glob("*.nii.gz"):
+        stem = p.name.replace(".nii.gz", "").upper()
+        if modality.upper() in stem.split("_") or stem.endswith(f"_{modality.upper()}") or stem.endswith(f"__{modality.upper()}"):
+            return p
+    return None
+
+def _find_label_file(pdir: Path, pid: str) -> Path | None:
+    for name in [f"{pid}.nii.gz", f"{pid}_label.nii.gz", f"{pid}__label.nii.gz", f"{pid}_seg.nii.gz"]:
+        p = pdir / name
+        if p.exists():
+            return p
+    return None
+
 def process_patient(args):
     """Traite un patient : rééchantillonnage, recadrage, preprocessing MONAI et sauvegarde."""
     pdir, output_dir = args
     pid      = pdir.name
-    ct_path  = pdir / f"{pid}__CT.nii.gz"
-    pt_path  = pdir / f"{pid}__PT.nii.gz"
-    lbl_path = pdir / f"{pid}.nii.gz"
-    if not ct_path.exists() or not pt_path.exists():
+    ct_path  = _find_modality_file(pdir, pid, "CT")
+    pt_path  = _find_modality_file(pdir, pid, "PT")
+    lbl_path = _find_label_file(pdir, pid)
+    if ct_path is None or pt_path is None:
         return pid, "missing"
     try:
         out_pdir = output_dir / pid
         out_pdir.mkdir(parents=True, exist_ok=True)
-        has_label = lbl_path.exists()
+        has_label = lbl_path is not None
         ct_sitk, pt_sitk, _, lbl_sitk = resample_images(
             str(ct_path), str(pt_path),
             str(lbl_path) if has_label else None,
