@@ -7,7 +7,7 @@
 #SBATCH --output=unzip.out   # Nom du travail
 #SBATCH --error=unzip.out    # Nom du fichier d'erreur (ici commun avec la sortie)
 #SBATCH --qos=qos_cpu-dev
-  
+#SBATCH --account=ehe@cpu
 
 module purge
 conda deactivate
