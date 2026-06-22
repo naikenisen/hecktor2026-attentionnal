@@ -1,7 +1,7 @@
 import os
-data_root = "/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset-hecktor/hecktor_dataset_suv"
-csv_path = "/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset-hecktor/HECKTOR 2026 Training Data/HECKTOR_2026_training_data.csv"
-csv_path_local="/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset-hecktor/HECKTOR 2026 Training Data/HECKTOR_2026_training_data.csv"
+data_root = "/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset/hecktor_dataset_suv"
+csv_path = "/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset/HECKTOR 2026 Training Data/HECKTOR_2026_training_data.csv"
+csv_path_local="/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset/HECKTOR 2026 Training Data/HECKTOR_2026_training_data.csv"
 
 # Segmentation nnU-Net (MONAI nnUNetV2Runner + paquet nnunetv2) — phase 1
 nnunet_dataset_id = 1                          # → Dataset001_HECKTOR
