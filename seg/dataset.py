@@ -14,23 +14,42 @@ from nnunetv2.dataset_conversion.generate_dataset_json import generate_dataset_j
 def build_records(case_ids: list, known_patients: set) -> list:
     """(case_id, ct, pet, label) pour les patients du CSV dont les 3 volumes existent."""
     records = []
+    skipped = []
     for case_id in case_ids:
         if case_id not in known_patients:
+            skipped.append((case_id, "absent du CSV"))
             continue
         patient_dir = os.path.join(config.data_root, case_id)
         ct = os.path.join(patient_dir, f"{case_id}__CT.nii.gz")
         pet = os.path.join(patient_dir, f"{case_id}__PT.nii.gz")
         label = os.path.join(patient_dir, f"{case_id}.nii.gz")
-        if not (os.path.exists(ct) and os.path.exists(pet) and os.path.exists(label)):
+        missing = [m for m, p in [("CT", ct), ("PT", pet), ("label", label)] if not os.path.exists(p)]
+        if missing:
+            skipped.append((case_id, f"fichier(s) manquant(s): {', '.join(missing)}"))
             continue
         records.append((case_id, ct, pet, label))
+    if skipped:
+        print(f"[dataset] {len(skipped)} patient(s) ignoré(s) :")
+        for pid, reason in skipped:
+            print(f"  skip {pid} — {reason}")
+    print(f"[dataset] {len(records)} patient(s) retenus sur {len(case_ids)}")
     return records
 
 
 def _symlink(src: str, dst: str):
     if os.path.lexists(dst):
-        return
+        os.unlink(dst)
     os.symlink(os.path.abspath(src), dst)
+
+
+def _clean_symlinks(directory: str):
+    """Supprime tous les symlinks existants dans un répertoire."""
+    if not os.path.isdir(directory):
+        return
+    for name in os.listdir(directory):
+        fp = os.path.join(directory, name)
+        if os.path.islink(fp):
+            os.unlink(fp)
 
 
 def prepare_raw_dataset(records: list) -> str:
@@ -42,6 +61,8 @@ def prepare_raw_dataset(records: list) -> str:
     labels_dir = os.path.join(raw_dir, "labelsTr")
     for d in (images_dir, labels_dir):
         os.makedirs(d, exist_ok=True)
+    _clean_symlinks(images_dir)
+    _clean_symlinks(labels_dir)
 
     datalist = []
     for case_id, ct, pet, label in records:
