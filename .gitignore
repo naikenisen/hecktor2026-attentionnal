@@ -42,3 +42,4 @@ tensorboard_logs/
 runs/
 dataset/
 results/
+.venv
