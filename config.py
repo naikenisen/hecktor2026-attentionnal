@@ -27,14 +27,28 @@ output_dir = "experiments"
 experiment_dir = os.path.join(output_dir, experiment_name)
 checkpoint_dir = os.path.join(experiment_dir, "checkpoints")
 features_dir = os.path.join(experiment_dir, "features")
-best_tn_t_path = os.path.join(checkpoint_dir, "tn_t_rf.joblib")
-best_tn_n_path = os.path.join(checkpoint_dir, "tn_n_rf.joblib")
-best_survival_path = os.path.join(checkpoint_dir, "survival_rsf.joblib")
-best_survival_tn_path = os.path.join(checkpoint_dir, "survival_rsf_with_tn.joblib")
-clinical_clean_csv_path = os.path.join(experiment_dir, "clinical_clean.csv")
-best_nnunet_survival_path = os.path.join(checkpoint_dir, "survival_nnunet_rsf.joblib")
-train_features_path = os.path.join(features_dir, "train.pt")
-val_features_path = os.path.join(features_dir, "val.pt")
+
+# Version des artefacts de phase 2 (embeddings figés + têtes tabulaires/survie). Incrémenter
+# pour tout régénérer sur la population COURANTE sans écraser les anciens embeddings ni les
+# anciens résultats : chaque fichier porte le suffixe `_<features_version>`. (Le modèle de
+# segmentation nnU-Net, phase 1, n'est PAS versionné — il reste réutilisé tel quel.)
+features_version = "v2"
+
+
+def _versioned(path: str) -> str:
+    """Insère le suffixe de version avant l'extension : `foo.pt` → `foo_v2.pt`."""
+    root, ext = os.path.splitext(path)
+    return f"{root}_{features_version}{ext}"
+
+
+best_tn_t_path = _versioned(os.path.join(checkpoint_dir, "tn_t_rf.joblib"))
+best_tn_n_path = _versioned(os.path.join(checkpoint_dir, "tn_n_rf.joblib"))
+best_survival_path = _versioned(os.path.join(checkpoint_dir, "survival_rsf.joblib"))
+best_survival_tn_path = _versioned(os.path.join(checkpoint_dir, "survival_rsf_with_tn.joblib"))
+clinical_clean_csv_path = _versioned(os.path.join(experiment_dir, "clinical_clean.csv"))
+best_nnunet_survival_path = _versioned(os.path.join(checkpoint_dir, "survival_nnunet_rsf.joblib"))
+train_features_path = _versioned(os.path.join(features_dir, "train.pt"))
+val_features_path = _versioned(os.path.join(features_dir, "val.pt"))
 
 # Arborescence nnU-Net (raw / preprocessed / results) sous l'expérience
 nnunet_work_dir = os.path.join(experiment_dir, "nnunet")
@@ -48,6 +62,6 @@ nnunet_model_dir = os.path.join(
 
 # Survie sur embedding CT du modèle de fondation CT-FM (SegResNet SSL, 512-D, CT seule)
 foundation_model_id = "project-lighter/ct_fm_feature_extractor"
-foundation_train_features_path = os.path.join(features_dir, "ct_fm_train.pt")
-foundation_val_features_path = os.path.join(features_dir, "ct_fm_val.pt")
-best_foundation_survival_path = os.path.join(checkpoint_dir, "survival_ct_fm_rsf.joblib")
+foundation_train_features_path = _versioned(os.path.join(features_dir, "ct_fm_train.pt"))
+foundation_val_features_path = _versioned(os.path.join(features_dir, "ct_fm_val.pt"))
+best_foundation_survival_path = _versioned(os.path.join(checkpoint_dir, "survival_ct_fm_rsf.joblib"))

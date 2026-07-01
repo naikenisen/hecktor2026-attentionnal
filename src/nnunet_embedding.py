@@ -125,11 +125,20 @@ class NNUNetBottleneckExtractor:
 
 
 def ensure_bottlenecks(config):
-    """Extrait les embeddings du bottleneck de l'encodeur nnU-Net si les fichiers de
-    features sont absents. Idempotent (utilisé par `tn.train` et `nnunet_survival.train`) :
-    n'utilise le GPU que lors de la première extraction."""
-    if os.path.exists(config.train_features_path) and os.path.exists(config.val_features_path):
-        print("bottleneck features already extracted, skipping")
+    """Extrait les embeddings du bottleneck de l'encodeur nnU-Net si le cache ne couvre pas
+    déjà le split courant. Idempotent tant que `data_root` est stable ; sinon (cache périmé)
+    il réextrait automatiquement (utilisé par `tn.train` et `nnunet_survival.train`) :
+    n'utilise le GPU que lors d'une (ré)extraction effective."""
+    from src.feature_cache import cache_covers
+    known_patients = set(pd.read_csv(config.csv_path)["PatientID"])
+    train_ids, val_ids = split_case_ids(config)
+    # Filtre identique à PetCtDataModule._build_records : les patients présents dans le CSV.
+    exp_train = [c for c in train_ids if c in known_patients]
+    exp_val = [c for c in val_ids if c in known_patients]
+    if (cache_covers(config.train_features_path, exp_train)
+            and cache_covers(config.val_features_path, exp_val)):
+        print(f"bottleneck features already extracted for current split "
+              f"({len(exp_train)} train / {len(exp_val)} val), skipping")
         return
     device = torch.device("cuda")
     NNUNetBottleneckExtractor(config, device).run()

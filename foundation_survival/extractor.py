@@ -52,7 +52,7 @@ class CtFmExtractor:
     def embed_split(self, case_ids: list) -> dict:
         embeddings, kept = [], []
         for case_id in tqdm(case_ids, desc="CT-FM", leave=False):
-            ct_path = os.path.join(self.config.data_root, case_id, f"{case_id}__CT.nii.gz")
+            ct_path = _ct_path(self.config, case_id)
             if not os.path.exists(ct_path):
                 continue
             try:
@@ -68,20 +68,33 @@ class CtFmExtractor:
         return {"embedding": torch.stack(embeddings), "case_id": kept}
 
 
+def _ct_path(config, case_id: str) -> str:
+    return os.path.join(config.data_root, case_id, f"{case_id}__CT.nii.gz")
+
+
+def _expected_ids(config, case_ids: list) -> list:
+    """case_id du split dont la CT existe : exactement ce que `embed_split` produira."""
+    return [c for c in case_ids if os.path.exists(_ct_path(config, c))]
+
+
 def ensure_ct_fm_features(config):
-    """Extrait les embeddings CT-FM des deux splits si les fichiers de features sont absents.
-    Idempotent : n'utilise le GPU que lors de la première extraction."""
-    if (os.path.exists(config.foundation_train_features_path)
-            and os.path.exists(config.foundation_val_features_path)):
-        print("CT-FM features already extracted, skipping")
-        return
+    """Extrait les embeddings CT-FM des deux splits si le cache ne couvre pas déjà le split
+    courant. Idempotent tant que `data_root` est stable ; sinon (cache périmé) il réextrait
+    automatiquement. N'utilise le GPU que lors d'une (ré)extraction effective."""
     from src.split import split_case_ids  # source unique du split (CPU seul, sans MONAI)
+    from src.feature_cache import cache_covers
     train_ids, val_ids = split_case_ids(config)
+    exp_train, exp_val = _expected_ids(config, train_ids), _expected_ids(config, val_ids)
+    if (cache_covers(config.foundation_train_features_path, exp_train)
+            and cache_covers(config.foundation_val_features_path, exp_val)):
+        print(f"CT-FM features already extracted for current split "
+              f"({len(exp_train)} train / {len(exp_val)} val), skipping")
+        return
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     extractor = CtFmExtractor(config, device)
     os.makedirs(config.features_dir, exist_ok=True)
-    print("extracting CT-FM train split")
+    print(f"extracting CT-FM train split ({len(exp_train)} cases)")
     torch.save(extractor.embed_split(train_ids), config.foundation_train_features_path)
-    print("extracting CT-FM val split")
+    print(f"extracting CT-FM val split ({len(exp_val)} cases)")
     torch.save(extractor.embed_split(val_ids), config.foundation_val_features_path)
     print(f"CT-FM features saved to {config.features_dir}")
