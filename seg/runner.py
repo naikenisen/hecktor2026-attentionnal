@@ -3,7 +3,7 @@ entraînement d'un fold, et lecture du Dice de validation produit par nnU-Net.
 """
 import os
 import json
-import config
+from . import config
 from monai.apps.nnunet import nnUNetV2Runner
 
 

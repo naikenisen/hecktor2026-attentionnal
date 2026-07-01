@@ -16,8 +16,8 @@ lancer ensuite (`python -m seg.extract`).
 """
 import os
 import pandas as pd
-import config
-from src.split import case_ids
+from . import config
+from .split import case_ids
 from seg.dataset import build_records, prepare_raw_dataset, write_project_split
 from seg.runner import build_runner, plan_and_process, train_fold, report_validation
 

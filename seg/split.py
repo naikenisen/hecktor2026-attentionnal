@@ -1,9 +1,7 @@
-"""Split train/test matérialisé sur le disque — source unique partagée par toute la pipeline.
+"""Split train/test matérialisé sur le disque — source unique pour seg.
 
 Le découpage n'est plus calculé en code : il EST donné par l'arborescence
-`data_root/{train,test}/<PatientID>/…` (générée depuis la colonne `split` du CSV). La
-segmentation (`seg`), les stades T/N (`tn`), la survie clinique (`clinical_survival`) et la
-survie sur bottleneck nnU-Net (`nnunet_survival`) lisent donc exactement les mêmes patients.
+`data_root/{train,test}/<PatientID>/…` (générée depuis la colonne `split` du CSV).
 """
 import os
 

@@ -35,7 +35,7 @@ nnunet_fold = 0
 nnunet_use_project_split = True                # fold 0 = split train/test du disque (cohérent avec le reste de la pipeline)
 nnunet_gpu_memory_gb = 8                        # cible mémoire de l'experiment planner
 
-# Arborescence nnU-Net. `nnUNet_raw` (liens symboliques, quasi vide) et `nnUNet_preprocessed`
+# Arborescence nnU-Net. `nnunet_raw` (liens symboliques, quasi vide) et `nnunet_preprocessed`
 # (lourd) restent sur le scratch, à côté des données ; seul le modèle entraîné (`nnUNet_results`)
 # va dans `results/` — c'est l'unique sous-dossier de results, imposé par nnU-Net.
 nnunet_raw_dir = f"{dataset_dir}/nnUNet_raw"

@@ -21,9 +21,10 @@ from tqdm import tqdm
 from torch.cuda.amp import autocast
 from monai.transforms import ResizeWithPadOrCrop
 
-import config
-from src.split import case_ids, patient_dir
-from src.features import FEATURE_PREFIX
+from . import config
+from .split import case_ids, patient_dir
+
+FEATURE_PREFIX = "feat_"
 
 
 def pool_embedding(bottleneck: torch.Tensor):

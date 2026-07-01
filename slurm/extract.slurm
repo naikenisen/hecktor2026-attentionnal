@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=train_nnunet_survival     # nom du job
-#SBATCH --output=train_nnunet_survival.out  # fichier de sortie (%j = job ID)
-#SBATCH --error=train_nnunet_survival.err   # fichier d'erreur (%j = job ID)
+#SBATCH --job-name=train_seg     # nom du job
+#SBATCH --output=train_seg.out  # fichier de sortie (%j = job ID)
+#SBATCH --error=train_seg.err   # fichier d'erreur (%j = job ID)
 #SBATCH --constraint=h100               # demander des GPU H100 80 Go
 #SBATCH --nodes=1                       # reserver 1 noeud
 #SBATCH --ntasks=1                      # 1 tache shell (les shards sont des sous-processus)
@@ -31,4 +31,4 @@ export TORCH_COMPILE_DISABLE=1
 set -x
 
 cd /lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal
-python -m nnunet_survival.train
+python -m seg.extract

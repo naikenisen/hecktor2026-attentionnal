@@ -7,8 +7,8 @@ par liens symboliques (CT → canal 0000, PET → canal 0001), plus `dataset.jso
 """
 import os
 import json
-import config
-from src.split import patient_dir
+from . import config
+from .split import patient_dir
 from nnunetv2.dataset_conversion.generate_dataset_json import generate_dataset_json
 
 

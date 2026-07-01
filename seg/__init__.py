@@ -5,7 +5,7 @@ dès l'import de `nnunetv2`. On les fixe ici, à l'import du paquet `seg` — do
 import d'un sous-module qui charge `nnunetv2` (`seg.dataset`, `seg.runner`).
 """
 import os
-import config
+from . import config
 
 os.environ["nnUNet_raw"] = config.nnunet_raw_dir
 os.environ["nnUNet_preprocessed"] = config.nnunet_preprocessed_dir

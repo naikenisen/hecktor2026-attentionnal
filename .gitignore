@@ -11,3 +11,6 @@ results/
 .DS_Store
 .vscode/
 .idea/
+
+# Intermediate generated tables
+tables/*_clean.csv
