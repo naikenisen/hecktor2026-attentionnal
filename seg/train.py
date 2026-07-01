@@ -10,6 +10,9 @@ ni retrain séparé — cette phase est complète à elle seule.
 
 Orchestration : split train/test du disque → arborescence brute nnU-Net → plan_and_process →
 fige le split du projet en fold 0 → entraîne 3d_fullres → reporte le Dice de validation.
+
+L'extraction du bottleneck de l'encodeur fait l'objet d'un script SÉPARÉ, `seg.extract`, à
+lancer ensuite (`python -m seg.extract`).
 """
 import os
 import pandas as pd

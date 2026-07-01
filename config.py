@@ -5,16 +5,18 @@
 dataset_dir = "/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset"
 data_root = f"{dataset_dir}/hecktor_dataset_suv"
 csv_path = "tables/HECKTOR_2026_training_data.csv"
+# Features poolées du bottleneck nnU-Net : CSV unique (PatientID + feat_i, tous splits),
+# produit par `seg.extract` sur le cluster puis rapatrié dans `tables/`. Lu tel quel par
+# `tn` et `nnunet_survival` (croisé avec la colonne `split` du CSV clinique).
+bottleneck_csv_path = "tables/bottleneck.csv"
 
 # === Sorties d'un run : tout dans `results/` ===
-# `results/` regroupe TOUT ce que produit un run (embeddings figés + modèle nnU-Net) et est
+# `results/` regroupe ce que produit l'entraînement nnU-Net (modèle + trace du split) et est
 # destiné à être archivé puis supprimé après chaque exécution. Aucun dossier d'expérience,
 # aucun versionnage : un seul chemin possible par artefact, écrasé à chaque run. Les chemins
 # sont donc écrits en dur (pas d'arborescence reconstruite). Seule exception : le sous-dossier
 # `nnUNet_results` (structure interne imposée par le paquet nnU-Net).
 results_dir = "results"
-train_features_path = "results/train.pt"      # embeddings figés du bottleneck nnU-Net (split train)
-test_features_path = "results/test.pt"        # embeddings figés du bottleneck nnU-Net (split test)
 datalist_path = "results/datalist.json"       # trace du split fourni à nnU-Net
 
 # Le CSV clinique nettoyé (dropna) est rangé avec les données sources, pas dans results.

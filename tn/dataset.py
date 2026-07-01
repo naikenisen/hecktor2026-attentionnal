@@ -1,14 +1,12 @@
 """Jeu de données d'embeddings TEP/CT figés pour les stades T/N.
 
-Charge les features extraites par `src.nnunet_embedding` (bottleneck de l'encodeur nnU-Net),
-les réduit en un vecteur par patient (`pool_embedding`) et les aligne par case_id avec les
-cibles de stade T et N lues dans le CSV.
+Lit les features poolées de `tables/bottleneck.csv` (via `src.features`) et les aligne par
+case_id avec les cibles de stade T et N lues dans le CSV clinique.
 """
 import numpy as np
 import pandas as pd
-import torch
 
-from src.nnunet_embedding import pool_embedding
+from src.features import load_features_by_split
 
 T_STAGES = ["T1", "T2", "T3", "T4"]
 N_STAGES = ["N0", "N1", "N2", "N3"]
@@ -28,10 +26,8 @@ class EmbeddingDataset:
     """Embedding TEP/CT figé d'un split, aligné par case_id avec ses cibles de stade T/N.
     Alimente les RandomForest de `tn.train` (la survie passe par les données cliniques)."""
 
-    def __init__(self, features: dict, patients: pd.DataFrame):
+    def __init__(self, case_ids: list, embeddings: np.ndarray, patients: pd.DataFrame):
         rows = patients.set_index("PatientID")
-        case_ids = list(features["case_id"])
-        embeddings = pool_embedding(features["bottleneck"])
 
         keep, t, n = [], [], []
         for i, case_id in enumerate(case_ids):
@@ -58,12 +54,11 @@ class EmbeddingDataset:
 
 
 def load_embeddings(config) -> tuple[EmbeddingDataset, EmbeddingDataset]:
-    """Charge les embeddings figés des deux splits et les joint à leurs cibles."""
-    # weights_only=False : features produites par notre propre NNUNetBottleneckExtractor.
-    train_features = torch.load(config.train_features_path, map_location="cpu", weights_only=False)
-    test_features = torch.load(config.test_features_path, map_location="cpu", weights_only=False)
+    """Croise `tables/bottleneck.csv` avec le split du CSV clinique et joint les features à
+    leurs cibles de stade T/N."""
     patients = pd.read_csv(config.csv_path)
-    train = EmbeddingDataset(train_features, patients)
-    test = EmbeddingDataset(test_features, patients)
+    features = load_features_by_split(config, patients)
+    train = EmbeddingDataset(*features["train"], patients)
+    test = EmbeddingDataset(*features["test"], patients)
     print(f"loaded {len(train)} train and {len(test)} test embeddings (dim {train.X.shape[1]})")
     return train, test

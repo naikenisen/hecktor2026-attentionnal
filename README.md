@@ -56,21 +56,24 @@ recherche d'hyperparamètres Optuna ni de retrain séparé**.
   → results/nnUNet_results/Dataset001_HECKTOR/...
 ```
 
-À la première exécution de `tn.train`, `ensure_bottlenecks()` (`NNUNetBottleneckExtractor`)
-recharge le modèle nnU-Net entraîné, **GÈLE son encodeur**, prétraite chaque patient *via
-nnU-Net lui-même* (resampling + normalisation par canal), recadre au patch du plan, et
-sauvegarde le **bottleneck du dernier étage d'encodage** vers
-`results/{train,test}.pt` (réutilisé ensuite).
+L'extraction du bottleneck fait l'objet d'un **script séparé**, `seg.extract`
+(`python -m seg.extract`), à lancer sur le cluster après la segmentation. Il recharge le
+modèle nnU-Net entraîné, **GÈLE son encodeur**, prétraite chaque patient *via nnU-Net
+lui-même* (resampling + normalisation par canal), recadre au patch du plan, réduit le
+**bottleneck du dernier étage d'encodage** en un vecteur par patient (`pool_embedding` :
+moyenne ⊕ max) et écrit un CSV **unique** `tables/bottleneck.csv` (`PatientID` + `feat_i`,
+tous splits confondus). Ce CSV est ensuite rapatrié dans `tables/` et lu tel quel par les
+têtes en aval — **plus aucune extraction ailleurs dans le dépôt**.
 
 ### Phase 2 — Têtes-forêts indépendantes (paquets `tn`, `clinical_survival`)
 
 ```
    EMBEDDING TEP/CT (image)                  DONNÉES CLINIQUES (CSV)
-   results/{train,test}.pt                   HECKTOR_2026_training_data.csv
+   tables/bottleneck.csv                     tables/HECKTOR_2026_training_data.csv
         │                                          │
-        │ pool_embedding : moyenne ⊕ max          │ ClinicalEncoder : âge standardisé +
-        │ → embedding (N, 2·C_enc)                 │ one-hot (genre, tabac, alcool,
-        │                                          │ perf. status, HPV, traitement)
+        │ features poolées (produites par          │ ClinicalEncoder : âge standardisé +
+        │ seg.extract) : PatientID + feat_i        │ one-hot (genre, tabac, alcool,
+        │ split via colonne `split` du CSV clinique│ perf. status, HPV, traitement)
         ▼                                          ▼
    ┌──────────────┬──────────────┐         RandomSurvivalForest  (clinical_survival.train)
    ▼              ▼                         cible (event, RFS) → score de risque
@@ -96,11 +99,16 @@ Chaque tâche est un paquet, lancé comme module **depuis la racine du dépôt**
 Slurm de `slurm/` font `cd` dans le projet avant d'appeler ces commandes) :
 
 ```bash
-python -m seg.train               # phase 1 : segmentation nnU-Net (auto-configurant, fold 0)
-python -m tn.train                # phase 2 : extraction auto des embeddings + RandomForest T/N
-python -m clinical_survival.train # phase 2 : RandomSurvivalForest sur données cliniques (CSV)
-python -m nnunet_survival.train   # phase 2 : RandomSurvivalForest sur le bottleneck nnU-Net
+python -m seg.train               # phase 1   : segmentation nnU-Net (auto-configurant, fold 0)
+python -m seg.extract             # phase 1bis : bottleneck → tables/bottleneck.csv (sur le cluster)
+python -m tn.train                # phase 2   : RandomForest T/N (lit tables/bottleneck.csv)
+python -m clinical_survival.train # phase 2   : RandomSurvivalForest sur données cliniques (CSV)
+python -m nnunet_survival.train   # phase 2   : RandomSurvivalForest sur le bottleneck nnU-Net
 ```
+
+`seg.extract` tourne sur le cluster (GPU) et produit `tables/bottleneck.csv` ; ce fichier est
+ensuite rapatrié dans `tables/`. Les têtes de phase 2 ne lisent que `tables/bottleneck.csv` et
+`tables/HECKTOR_2026_training_data.csv` — elles n'extraient rien.
 
 ### Sorties d'un run (`results/`)
 
@@ -111,11 +119,13 @@ ce qui a été produit.
 
 ```
 results/
-├── train.pt / test.pt           # embeddings figés du bottleneck nnU-Net (cache réutilisé par tn / nnunet_survival)
 ├── datalist.json                # trace du split fourni à nnU-Net
 └── nnUNet_results/              # modèle nnU-Net entraîné (seul sous-dossier, imposé par nnU-Net)
     └── Dataset001_HECKTOR/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/…
 ```
+
+Les features du bottleneck ne vont **pas** dans `results/` mais dans `tables/bottleneck.csv`
+(produit par `seg.extract`, versionné avec les autres tables).
 
 Restent **hors de `results/`**, sur le scratch à côté des données (`dataset/`), car lourds ou
 réutilisables : `nnUNet_raw/` (liens symboliques), `nnUNet_preprocessed/` (données prétraitées
@@ -126,7 +136,7 @@ seuls les scores (balanced accuracy, c-index) sont affichés.
 
 Troisième tête de survie : on réutilise **le même embedding que `tn`** — le bottleneck de
 l'encodeur nnU-Net (`src.nnunet_embedding`, extrait une seule fois puis mis en cache dans
-`results/{train,test}.pt`) — mais on entraîne un `RandomSurvivalForest` sur la cible
+`results/{train,test}.csv`) — mais on entraîne un `RandomSurvivalForest` sur la cible
 `(événement, RFS)` au lieu des stades T/N. L'alignement embedding ↔ survie et la forêt sont
 mutualisés (`src.survival_targets`, `src.survival_forest`).
 
