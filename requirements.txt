@@ -13,3 +13,4 @@ joblib
 tqdm
 einops
 optuna
+lighter_zoo
