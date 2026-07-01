@@ -1,8 +1,8 @@
 """Alignement embedding ↔ cible de survie (RFS, événement).
 
-Partagé par les têtes de survie qui partent d'une matrice d'embeddings figés :
-`foundation_survival` (CT-FM) et `nnunet_survival` (bottleneck nnU-Net). La survie clinique
-n'utilise pas ce helper (elle encode des variables tabulaires, cf. clinical_survival).
+Utilisé par `nnunet_survival` (bottleneck nnU-Net), la seule tête de survie qui part d'une
+matrice d'embeddings figés. La survie clinique n'utilise pas ce helper (elle encode des
+variables tabulaires, cf. clinical_survival).
 """
 import numpy as np
 import pandas as pd

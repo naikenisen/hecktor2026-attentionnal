@@ -22,7 +22,7 @@ def build_runner(datalist_path: str) -> nnUNetV2Runner:
             "nnunet_results": config.nnunet_results_dir,
         },
         trainer_class_name=config.nnunet_trainer,
-        work_dir=config.nnunet_work_dir,
+        work_dir=config.results_dir,
     )
 
 

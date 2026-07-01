@@ -20,7 +20,7 @@ from seg.runner import build_runner, plan_and_process, train_fold, report_valida
 
 
 def main():
-    for d in (config.experiment_dir, config.nnunet_work_dir, config.nnunet_raw_dir,
+    for d in (config.results_dir, config.nnunet_raw_dir,
               config.nnunet_preprocessed_dir, config.nnunet_results_dir):
         os.makedirs(d, exist_ok=True)
 

@@ -1,8 +1,8 @@
 """Split train/val déterministe des patients — source unique partagée par toute la pipeline.
 
-Utilisé par la segmentation (`seg`), l'extraction d'embeddings T/N (`tn`), la survie clinique
-(`survival`) et la variante CT-FM (`foundation_survival`) : garantit des splits strictement
-identiques entre toutes les têtes.
+Utilisé par la segmentation (`seg`), les stades T/N (`tn`), la survie clinique
+(`clinical_survival`) et la survie sur bottleneck nnU-Net (`nnunet_survival`) : garantit des
+splits strictement identiques entre toutes les têtes.
 """
 import os
 import random

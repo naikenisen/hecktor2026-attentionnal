@@ -81,7 +81,7 @@ def prepare_raw_dataset(records: list) -> str:
         dataset_name=config.nnunet_dataset_name,
     )
 
-    datalist_path = os.path.join(config.nnunet_work_dir, "datalist.json")
+    datalist_path = config.datalist_path
     with open(datalist_path, "w") as f:
         json.dump({"training": datalist, "testing": []}, f, indent=2)
     print(f"[nnunet] {len(records)} cas → {raw_dir}")

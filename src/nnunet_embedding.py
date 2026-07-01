@@ -113,7 +113,7 @@ class NNUNetBottleneckExtractor:
         encoder = self._build_encoder(predictor)
         preprocessor = DefaultPreprocessor(verbose=False)
         crop = ResizeWithPadOrCrop(spatial_size=tuple(predictor.configuration_manager.patch_size))
-        os.makedirs(self.config.features_dir, exist_ok=True)
+        os.makedirs(self.config.results_dir, exist_ok=True)
         for split_ids, out_path, name in (
             (self.data.train_ids, self.config.train_features_path, "train"),
             (self.data.val_ids, self.config.val_features_path, "val"),
@@ -121,7 +121,7 @@ class NNUNetBottleneckExtractor:
             records = self.data._build_records(split_ids)
             print(f"extracting {name} split ({len(records)} cases)")
             torch.save(self._bottlenecks_of(predictor, encoder, preprocessor, crop, records), out_path)
-        print(f"features saved to {self.config.features_dir}")
+        print(f"features saved to {self.config.results_dir}")
 
 
 def ensure_bottlenecks(config):
