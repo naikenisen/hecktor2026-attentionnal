@@ -16,10 +16,10 @@ from tn.forest import train_rf
 
 def main():
     ensure_bottlenecks(config)
-    train, val = load_embeddings(config)
+    train, test = load_embeddings(config)
 
-    bal_t = train_rf("t_label", train, val)
-    bal_n = train_rf("n_label", train, val)
+    bal_t = train_rf("t_label", train, test)
+    bal_n = train_rf("n_label", train, test)
     print(f"\nT balanced accuracy {bal_t:.4f} | N balanced accuracy {bal_n:.4f}")
 
 

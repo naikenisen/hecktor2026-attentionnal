@@ -46,8 +46,8 @@ recherche d'hyperparamètres Optuna ni de retrain séparé**.
         ▼
   nnUNetV2Runner.plan_and_process()   ← empreinte + planification + prétraitement
         │
-        │ splits_final.json : fold 0 figé sur split_case_ids (mêmes patients que la
-        │ pipeline image — cohérence du split conservée)
+        │ splits_final.json : fold 0 figé sur le split train/test du disque (mêmes patients
+        │ que la pipeline image — cohérence du split conservée)
         ▼
   nnUNetV2Runner.train_single_model("3d_fullres", fold=0)
         │   perte Dice+CE, deep supervision, SW inference — gérés par nnU-Net
@@ -60,13 +60,13 @@ recherche d'hyperparamètres Optuna ni de retrain séparé**.
 recharge le modèle nnU-Net entraîné, **GÈLE son encodeur**, prétraite chaque patient *via
 nnU-Net lui-même* (resampling + normalisation par canal), recadre au patch du plan, et
 sauvegarde le **bottleneck du dernier étage d'encodage** vers
-`results/{train,val}.pt` (déterministe, réutilisé ensuite).
+`results/{train,test}.pt` (réutilisé ensuite).
 
 ### Phase 2 — Têtes-forêts indépendantes (paquets `tn`, `clinical_survival`)
 
 ```
    EMBEDDING TEP/CT (image)                  DONNÉES CLINIQUES (CSV)
-   results/{train,val}.pt                    HECKTOR_2026_training_data.csv
+   results/{train,test}.pt                   HECKTOR_2026_training_data.csv
         │                                          │
         │ pool_embedding : moyenne ⊕ max          │ ClinicalEncoder : âge standardisé +
         │ → embedding (N, 2·C_enc)                 │ one-hot (genre, tabac, alcool,
@@ -79,13 +79,13 @@ sauvegarde le **bottleneck du dernier étage d'encodage** vers
  class_weight=balanced                             │
  → stade T        → stade N                  GridSearchCV (CV)
    balanced acc     balanced acc
-        └─ GridSearchCV (val) ─┘
+        └─ GridSearchCV (test) ─┘
 
   • Trois forêts strictement indépendantes, AUCUNE fusion image / clinique.
   • T/N : embedding image seul, lignes au label connu (>= 0).
   • Survie : variables cliniques seules (T/N-stage exclus — ce sont les cibles, non
     disponibles à l'inférence) ; patients à RFS renseigné (> 0).
-  • Split train/val partagé avec la pipeline image (même seed).
+  • Split train/test partagé avec la pipeline image (arborescence du disque).
   • Aucun modèle de forêt n'est sauvegardé : seuls les scores (balanced acc, c-index)
     sont affichés ; le seul artefact lourd d'un run est le modèle nnU-Net (results/).
 ```
@@ -111,7 +111,7 @@ ce qui a été produit.
 
 ```
 results/
-├── train.pt / val.pt            # embeddings figés du bottleneck nnU-Net (cache réutilisé par tn / nnunet_survival)
+├── train.pt / test.pt           # embeddings figés du bottleneck nnU-Net (cache réutilisé par tn / nnunet_survival)
 ├── datalist.json                # trace du split fourni à nnU-Net
 └── nnUNet_results/              # modèle nnU-Net entraîné (seul sous-dossier, imposé par nnU-Net)
     └── Dataset001_HECKTOR/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/…
@@ -126,7 +126,7 @@ seuls les scores (balanced accuracy, c-index) sont affichés.
 
 Troisième tête de survie : on réutilise **le même embedding que `tn`** — le bottleneck de
 l'encodeur nnU-Net (`src.nnunet_embedding`, extrait une seule fois puis mis en cache dans
-`results/{train,val}.pt`) — mais on entraîne un `RandomSurvivalForest` sur la cible
+`results/{train,test}.pt`) — mais on entraîne un `RandomSurvivalForest` sur la cible
 `(événement, RFS)` au lieu des stades T/N. L'alignement embedding ↔ survie et la forêt sont
 mutualisés (`src.survival_targets`, `src.survival_forest`).
 
@@ -170,7 +170,7 @@ hecktor2026/
 │   └── preprocess.py            #   resampling / recadrage / normalisation → python preprocessing/preprocess.py
 │
 ├── src/                         # Code partagé entre plusieurs têtes
-│   ├── split.py                 #   split_case_ids — split train/val déterministe (toutes les têtes)
+│   ├── split.py                 #   case_ids — lecture du split train/test du disque (toutes les têtes)
 │   ├── nnunet_embedding.py      #   extraction du bottleneck nnU-Net + pool_embedding (tn, nnunet_survival)
 │   ├── survival_targets.py      #   alignement embedding ↔ (RFS, événement) (nnunet_survival)
 │   ├── metrics.py               #   balanced_accuracy, c_index

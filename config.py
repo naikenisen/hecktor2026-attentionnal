@@ -1,8 +1,10 @@
 # === Données sources (dataset HECKTOR sur le scratch Jean-Zay) ===
+# Le split train/test est matérialisé sur le disque : `data_root/{train,test}/<PatientID>/…`
+# (généré depuis la colonne `split` du CSV). Il n'existe donc plus aucun découpage aléatoire
+# en code — la liste des patients d'un split EST le contenu de son sous-dossier.
 dataset_dir = "/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset"
 data_root = f"{dataset_dir}/hecktor_dataset_suv"
-csv_path = f"{dataset_dir}/HECKTOR 2026 Training Data/HECKTOR_2026_training_data.csv"
-csv_path_local = csv_path
+csv_path = "tables/HECKTOR_2026_training_data.csv"
 
 # === Sorties d'un run : tout dans `results/` ===
 # `results/` regroupe TOUT ce que produit un run (embeddings figés + modèle nnU-Net) et est
@@ -12,7 +14,7 @@ csv_path_local = csv_path
 # `nnUNet_results` (structure interne imposée par le paquet nnU-Net).
 results_dir = "results"
 train_features_path = "results/train.pt"      # embeddings figés du bottleneck nnU-Net (split train)
-val_features_path = "results/val.pt"          # embeddings figés du bottleneck nnU-Net (split val)
+test_features_path = "results/test.pt"        # embeddings figés du bottleneck nnU-Net (split test)
 datalist_path = "results/datalist.json"       # trace du split fourni à nnU-Net
 
 # Le CSV clinique nettoyé (dropna) est rangé avec les données sources, pas dans results.
@@ -28,7 +30,7 @@ nnunet_trainer = "nnUNetTrainer"               # ex. "nnUNetTrainer_250epochs" p
 nnunet_plans = "nnUNetPlans"                   # nom des plans (défaut de l'experiment planner)
 nnunet_checkpoint = "checkpoint_final.pth"     # checkpoint (dans results/nnUNet_results) rechargé pour l'extraction d'embeddings
 nnunet_fold = 0
-nnunet_use_project_split = True                # fold 0 = split_case_ids (cohérent avec le reste de la pipeline)
+nnunet_use_project_split = True                # fold 0 = split train/test du disque (cohérent avec le reste de la pipeline)
 nnunet_gpu_memory_gb = 8                        # cible mémoire de l'experiment planner
 
 # Arborescence nnU-Net. `nnUNet_raw` (liens symboliques, quasi vide) et `nnUNet_preprocessed`
@@ -46,6 +48,4 @@ nnunet_model_dir = f"{nnunet_results_dir}/{nnunet_dataset_dir}/{nnunet_trainer}_
 # forêts (RandomForest T/N, RandomSurvivalForest survie), par GridSearchCV (grilles définies
 # dans `tn.forest` et `src.survival_forest`). Aucun modèle de forêt n'est sauvegardé.
 rf_seed = 42          # graine partagée RandomForest (T/N) et RandomSurvivalForest (survie)
-val_split = 0.2       # proportion du split de validation
-seed = 42             # graine du split train/val déterministe
 num_workers = 4

@@ -8,31 +8,37 @@ par liens symboliques (CT → canal 0000, PET → canal 0001), plus `dataset.jso
 import os
 import json
 import config
+from src.split import patient_dir
 from nnunetv2.dataset_conversion.generate_dataset_json import generate_dataset_json
 
 
-def build_records(case_ids: list, known_patients: set) -> list:
-    """(case_id, ct, pet, label) pour les patients du CSV dont les 3 volumes existent."""
+def build_records(ids_by_split: dict, known_patients: set) -> list:
+    """(case_id, ct, pet, label) pour les patients du CSV dont les 3 volumes existent.
+    `ids_by_split` associe chaque split ("train"/"test") à ses case_ids : les chemins sont
+    résolus dans le sous-dossier du split correspondant."""
     records = []
     skipped = []
-    for case_id in case_ids:
-        if case_id not in known_patients:
-            skipped.append((case_id, "absent du CSV"))
-            continue
-        patient_dir = os.path.join(config.data_root, case_id)
-        ct = os.path.join(patient_dir, f"{case_id}__CT.nii.gz")
-        pet = os.path.join(patient_dir, f"{case_id}__PT.nii.gz")
-        label = os.path.join(patient_dir, f"{case_id}.nii.gz")
-        missing = [m for m, p in [("CT", ct), ("PT", pet), ("label", label)] if not os.path.exists(p)]
-        if missing:
-            skipped.append((case_id, f"fichier(s) manquant(s): {', '.join(missing)}"))
-            continue
-        records.append((case_id, ct, pet, label))
+    total = 0
+    for split, case_ids in ids_by_split.items():
+        for case_id in case_ids:
+            total += 1
+            if case_id not in known_patients:
+                skipped.append((case_id, "absent du CSV"))
+                continue
+            pdir = patient_dir(config, split, case_id)
+            ct = os.path.join(pdir, f"{case_id}__CT.nii.gz")
+            pet = os.path.join(pdir, f"{case_id}__PT.nii.gz")
+            label = os.path.join(pdir, f"{case_id}.nii.gz")
+            missing = [m for m, p in [("CT", ct), ("PT", pet), ("label", label)] if not os.path.exists(p)]
+            if missing:
+                skipped.append((case_id, f"fichier(s) manquant(s): {', '.join(missing)}"))
+                continue
+            records.append((case_id, ct, pet, label))
     if skipped:
         print(f"[dataset] {len(skipped)} patient(s) ignoré(s) :")
         for pid, reason in skipped:
             print(f"  skip {pid} — {reason}")
-    print(f"[dataset] {len(records)} patient(s) retenus sur {len(case_ids)}")
+    print(f"[dataset] {len(records)} patient(s) retenus sur {total}")
     return records
 
 
@@ -88,17 +94,18 @@ def prepare_raw_dataset(records: list) -> str:
     return datalist_path
 
 
-def write_project_split(train_ids: list, val_ids: list, valid_case_ids: list):
-    """Fige le split déterministe du projet (`split_case_ids`) en fold 0 du
-    `splits_final.json` nnU-Net : la validation porte alors exactement sur les mêmes
-    patients que le reste de la pipeline. nnU-Net régénère une CV 5-fold s'il est absent."""
+def write_project_split(train_ids: list, test_ids: list, valid_case_ids: list):
+    """Fige le split train/test du disque en fold 0 du `splits_final.json` nnU-Net : la
+    validation nnU-Net porte alors exactement sur les mêmes patients (le split test) que le
+    reste de la pipeline. nnU-Net régénère une CV 5-fold s'il est absent. La clé `"val"` est
+    imposée par le schéma nnU-Net (c'est notre split test)."""
     valid = set(valid_case_ids)
     split = [{
         "train": [c for c in train_ids if c in valid],
-        "val": [c for c in val_ids if c in valid],
+        "val": [c for c in test_ids if c in valid],
     }]
     preprocessed_dir = os.path.join(config.nnunet_preprocessed_dir, config.nnunet_dataset_dir)
     os.makedirs(preprocessed_dir, exist_ok=True)
     with open(os.path.join(preprocessed_dir, "splits_final.json"), "w") as f:
         json.dump(split, f, indent=2)
-    print(f"[nnunet] fold 0 figé : {len(split[0]['train'])} train / {len(split[0]['val'])} val")
+    print(f"[nnunet] fold 0 figé : {len(split[0]['train'])} train / {len(split[0]['val'])} test")

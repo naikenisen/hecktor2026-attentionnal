@@ -18,10 +18,10 @@ from src.survival_forest import search_rsf
 
 def main():
     ensure_bottlenecks(config)
-    (X_train, t_train, e_train), (X_val, t_val, e_val) = load_nnunet_survival(config)
+    (X_train, t_train, e_train), (X_test, t_test, e_test) = load_nnunet_survival(config)
     y_train = Surv.from_arrays(event=e_train, time=t_train)
 
-    _, c, params = search_rsf(X_train, y_train, X_val, t_val, e_val)
+    _, c, params = search_rsf(X_train, y_train, X_test, t_test, e_test)
     print(f"\nbest c-index {c:.4f}")
     print(f"best params {params}")
 

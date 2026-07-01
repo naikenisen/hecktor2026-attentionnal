@@ -8,13 +8,13 @@ nnU-Net est auto-configurant : il dérive patch size, batch size, normalisation 
 augmentation de l'empreinte du jeu de données. Il n'y a donc ni recherche d'hyperparamètres
 ni retrain séparé — cette phase est complète à elle seule.
 
-Orchestration : split déterministe → arborescence brute nnU-Net → plan_and_process →
+Orchestration : split train/test du disque → arborescence brute nnU-Net → plan_and_process →
 fige le split du projet en fold 0 → entraîne 3d_fullres → reporte le Dice de validation.
 """
 import os
 import pandas as pd
 import config
-from src.split import split_case_ids
+from src.split import case_ids
 from seg.dataset import build_records, prepare_raw_dataset, write_project_split
 from seg.runner import build_runner, plan_and_process, train_fold, report_validation
 
@@ -25,8 +25,9 @@ def main():
         os.makedirs(d, exist_ok=True)
 
     known_patients = set(pd.read_csv(config.csv_path)["PatientID"])
-    train_ids, val_ids = split_case_ids(config)
-    records = build_records(train_ids + val_ids, known_patients)
+    train_ids = case_ids(config, "train")
+    test_ids = case_ids(config, "test")
+    records = build_records({"train": train_ids, "test": test_ids}, known_patients)
     valid_case_ids = [r[0] for r in records]
 
     datalist_path = prepare_raw_dataset(records)
@@ -37,7 +38,7 @@ def main():
         if config.nnunet_fold != 0:
             raise ValueError(
                 "nnunet_use_project_split=True impose nnunet_fold=0 (le projet n'a qu'un split)")
-        write_project_split(train_ids, val_ids, valid_case_ids)
+        write_project_split(train_ids, test_ids, valid_case_ids)
 
     train_fold(runner)
     report_validation()

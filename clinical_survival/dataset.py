@@ -10,8 +10,6 @@ import os
 import numpy as np
 import pandas as pd
 
-from src.split import split_ids
-
 AGE_COLUMN = "Age"
 BASE_COLUMNS = [
     "Gender",
@@ -29,7 +27,7 @@ def preprocess(config) -> pd.DataFrame:
     """Étape 1 — charge le CSV brut, supprime toutes les lignes avec au moins une valeur
     manquante, sauvegarde le résultat dans config.clinical_clean_csv_path.
     Retourne le DataFrame nettoyé et affiche un résumé."""
-    raw = pd.read_csv(config.csv_path_local)
+    raw = pd.read_csv(config.csv_path)
     clean = raw.dropna().reset_index(drop=True)
 
     n_dropped = len(raw) - len(clean)
@@ -115,10 +113,11 @@ def load_clinical_survival(
     config, use_tn: bool = False
 ) -> tuple[ClinicalSurvivalDataset, ClinicalSurvivalDataset]:
     """Étape 2 — lit le CSV nettoyé (doit avoir été généré par preprocess()),
-    encode et retourne (train, test)."""
+    encode et retourne (train, test). Le découpage train/test provient de la colonne
+    `split` du CSV (valeurs "train"/"test"), fixée en amont sur le jeu de données."""
     patients = pd.read_csv(config.clinical_clean_csv_path)
-    all_ids = patients["PatientID"].astype(str).tolist()
-    train_ids, test_ids = split_ids(all_ids, config)
+    train_ids = patients.loc[patients["split"] == "train", "PatientID"].astype(str).tolist()
+    test_ids = patients.loc[patients["split"] == "test", "PatientID"].astype(str).tolist()
     train_patients = patients[patients["PatientID"].isin(train_ids)]
     encoder = ClinicalEncoder(use_tn=use_tn).fit(train_patients)
     return (

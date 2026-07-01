@@ -16,10 +16,10 @@ def load_nnunet_survival(config) -> tuple:
     de survie (RFS, événement)."""
     # weights_only=False : features produites par notre propre NNUNetBottleneckExtractor.
     train = torch.load(config.train_features_path, map_location="cpu", weights_only=False)
-    val = torch.load(config.val_features_path, map_location="cpu", weights_only=False)
+    test = torch.load(config.test_features_path, map_location="cpu", weights_only=False)
     patients = pd.read_csv(config.csv_path)
     train_xy = survival_xy(pool_embedding(train["bottleneck"]), train["case_id"], patients)
-    val_xy = survival_xy(pool_embedding(val["bottleneck"]), val["case_id"], patients)
-    print(f"nnU-Net survival: {len(train_xy[1])} train / {len(val_xy[1])} val patients with RFS "
+    test_xy = survival_xy(pool_embedding(test["bottleneck"]), test["case_id"], patients)
+    print(f"nnU-Net survival: {len(train_xy[1])} train / {len(test_xy[1])} test patients with RFS "
           f"(dim {train_xy[0].shape[1]})")
-    return train_xy, val_xy
+    return train_xy, test_xy

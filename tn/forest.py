@@ -1,6 +1,6 @@
 """RandomForest de classification des stades T/N : construction du classifieur et recherche
 par grille (`GridSearchCV`) des hyperparamètres, sélectionnés sur la balanced accuracy du
-split de validation (via `PredefinedSplit` : entraînement sur le train, score sur la validation).
+split test (via `PredefinedSplit` : entraînement sur le train, score sur le test).
 Aucun modèle n'est sauvegardé — les artefacts d'un run se limitent au dossier `results`.
 """
 import numpy as np
@@ -26,22 +26,22 @@ def _build_rf() -> RandomForestClassifier:
     )
 
 
-def train_rf(field: str, train, val) -> float:
+def train_rf(field: str, train, test) -> float:
     """Recherche par grille du meilleur RandomForest pour un champ de stade (`t_label` ou
-    `n_label`), sélectionné sur la balanced accuracy de validation. Renvoie ce meilleur score.
+    `n_label`), sélectionné sur la balanced accuracy du split test. Renvoie ce meilleur score.
     """
     X_train, y_train = train.labelled(field)
-    X_val, y_val = val.labelled(field)
-    print(f"[{field}] {len(y_train)} train / {len(y_val)} val labelled samples")
-    if len(y_train) == 0 or len(y_val) == 0:
+    X_test, y_test = test.labelled(field)
+    print(f"[{field}] {len(y_train)} train / {len(y_test)} test labelled samples")
+    if len(y_train) == 0 or len(y_test) == 0:
         print(f"[{field}] pas assez de labels — ignoré")
         return 0.0
 
-    # PredefinedSplit : le train reçoit -1 (jamais en test), la validation 0 → GridSearchCV
-    # entraîne sur le train et score sur la validation (aucune fuite : un seul pli fixe).
-    X = np.concatenate([X_train, X_val])
-    y = np.concatenate([y_train, y_val])
-    test_fold = np.concatenate([np.full(len(y_train), -1), np.zeros(len(y_val))])
+    # PredefinedSplit : le train reçoit -1 (jamais en test), le split test 0 → GridSearchCV
+    # entraîne sur le train et score sur le test (aucune fuite : un seul pli fixe).
+    X = np.concatenate([X_train, X_test])
+    y = np.concatenate([y_train, y_test])
+    test_fold = np.concatenate([np.full(len(y_train), -1), np.zeros(len(y_test))])
 
     search = GridSearchCV(
         estimator=_build_rf(),

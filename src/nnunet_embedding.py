@@ -2,7 +2,7 @@
 
 Recharge le modèle nnU-Net entraîné (phase 1), GÈLE son encodeur, et sauvegarde le
 bottleneck spatial profond de chaque patient (carte du dernier étage d'encodage) vers
-`features/{train,val}.pt`. Code **partagé** par les têtes qui exploitent cet embedding :
+`results/{train,test}.pt`. Code **partagé** par les têtes qui exploitent cet embedding :
 `tn` (stades T/N) et `nnunet_survival` (survie). `pool_embedding` réduit le bottleneck
 spatial en un vecteur par patient.
 """
@@ -12,7 +12,7 @@ import pandas as pd
 from tqdm import tqdm
 from torch.cuda.amp import autocast
 from monai.transforms import ResizeWithPadOrCrop
-from src.split import split_case_ids
+from src.split import case_ids, patient_dir
 
 
 def pool_embedding(bottleneck: torch.Tensor):
@@ -25,29 +25,26 @@ def pool_embedding(bottleneck: torch.Tensor):
 
 
 class PetCtDataModule:
-    """Partitionne les patients en train/val (split déterministe partagé avec le reste de
-    la pipeline) et expose les chemins CT/PET/masque de chaque cas."""
+    """Lit les patients de chaque split train/test (arborescence du disque, partagée avec le
+    reste de la pipeline) et expose les chemins CT/PET/masque de chaque cas."""
 
     def __init__(self, config):
         self.config = config
         self.known_patients = set(pd.read_csv(config.csv_path)["PatientID"])
-        self.train_ids, self.val_ids = self._split_case_ids()
+        self.train_ids = case_ids(config, "train")
+        self.test_ids = case_ids(config, "test")
+        print(f"{len(self.train_ids)} train / {len(self.test_ids)} test")
 
-    def _split_case_ids(self) -> tuple:
-        train_ids, val_ids = split_case_ids(self.config)
-        print(f"{len(train_ids)} train / {len(val_ids)} val")
-        return train_ids, val_ids
-
-    def _build_records(self, case_ids: list) -> list:
+    def _build_records(self, split: str, ids: list) -> list:
         records = []
-        for case_id in case_ids:
+        for case_id in ids:
             if case_id not in self.known_patients:
                 continue
-            patient_dir = os.path.join(self.config.data_root, case_id)
+            pdir = patient_dir(self.config, split, case_id)
             records.append({
-                "ct":      os.path.join(patient_dir, f"{case_id}__CT.nii.gz"),
-                "pet":     os.path.join(patient_dir, f"{case_id}__PT.nii.gz"),
-                "label":   os.path.join(patient_dir, f"{case_id}.nii.gz"),
+                "ct":      os.path.join(pdir, f"{case_id}__CT.nii.gz"),
+                "pet":     os.path.join(pdir, f"{case_id}__PT.nii.gz"),
+                "label":   os.path.join(pdir, f"{case_id}.nii.gz"),
                 "case_id": case_id,
             })
         return records
@@ -114,11 +111,11 @@ class NNUNetBottleneckExtractor:
         preprocessor = DefaultPreprocessor(verbose=False)
         crop = ResizeWithPadOrCrop(spatial_size=tuple(predictor.configuration_manager.patch_size))
         os.makedirs(self.config.results_dir, exist_ok=True)
-        for split_ids, out_path, name in (
-            (self.data.train_ids, self.config.train_features_path, "train"),
-            (self.data.val_ids, self.config.val_features_path, "val"),
+        for name, split_ids, out_path in (
+            ("train", self.data.train_ids, self.config.train_features_path),
+            ("test", self.data.test_ids, self.config.test_features_path),
         ):
-            records = self.data._build_records(split_ids)
+            records = self.data._build_records(name, split_ids)
             print(f"extracting {name} split ({len(records)} cases)")
             torch.save(self._bottlenecks_of(predictor, encoder, preprocessor, crop, records), out_path)
         print(f"features saved to {self.config.results_dir}")
@@ -131,14 +128,13 @@ def ensure_bottlenecks(config):
     n'utilise le GPU que lors d'une (ré)extraction effective."""
     from src.feature_cache import cache_covers
     known_patients = set(pd.read_csv(config.csv_path)["PatientID"])
-    train_ids, val_ids = split_case_ids(config)
     # Filtre identique à PetCtDataModule._build_records : les patients présents dans le CSV.
-    exp_train = [c for c in train_ids if c in known_patients]
-    exp_val = [c for c in val_ids if c in known_patients]
+    exp_train = [c for c in case_ids(config, "train") if c in known_patients]
+    exp_test = [c for c in case_ids(config, "test") if c in known_patients]
     if (cache_covers(config.train_features_path, exp_train)
-            and cache_covers(config.val_features_path, exp_val)):
+            and cache_covers(config.test_features_path, exp_test)):
         print(f"bottleneck features already extracted for current split "
-              f"({len(exp_train)} train / {len(exp_val)} val), skipping")
+              f"({len(exp_train)} train / {len(exp_test)} test), skipping")
         return
     device = torch.device("cuda")
     NNUNetBottleneckExtractor(config, device).run()

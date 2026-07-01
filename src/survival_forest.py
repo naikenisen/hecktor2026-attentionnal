@@ -4,10 +4,10 @@ Partagé par les têtes de survie (variables cliniques, embedding nnU-Net) : ell
 que par la source des features, pas par la forêt ni la grille d'hyperparamètres.
 
 Sélection par validation croisée K-fold sur le train (score par défaut du RSF = concordance
-de Harrell), pas sur un unique split de validation : avec les petites cohortes HECKTOR, le
-c-index d'un seul split est trop bruité pour sélectionner sans surajuster ce split. Le split
-de validation reste tenu à l'écart de la recherche et ne sert qu'au report d'un c-index
-honnête. Aucun modèle n'est sauvegardé — les artefacts d'un run se limitent au dossier `results`.
+de Harrell), pas sur un unique split : avec les petites cohortes HECKTOR, le c-index d'un
+seul split est trop bruité pour sélectionner sans surajuster ce split. Le split test reste
+tenu à l'écart de la recherche et ne sert qu'au report d'un c-index honnête. Aucun modèle
+n'est sauvegardé — les artefacts d'un run se limitent au dossier `results`.
 """
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from sksurv.ensemble import RandomSurvivalForest
@@ -38,10 +38,10 @@ _PARAM_GRID = {
 }
 
 
-def search_rsf(X_train, y_train, X_val, t_val, e_val) -> tuple:
+def search_rsf(X_train, y_train, X_test, t_test, e_test) -> tuple:
     """Recherche par grille des hyperparamètres du RSF, sélectionnés par CV K-fold sur le
-    c-index, puis réentraîne le meilleur modèle sur tout le train. Le split de validation,
-    hors sélection, fournit le c-index reporté. Retourne (modèle, c-index val, params)."""
+    c-index, puis réentraîne le meilleur modèle sur tout le train. Le split test, hors
+    sélection, fournit le c-index reporté. Retourne (modèle, c-index test, params)."""
     search = GridSearchCV(
         estimator=RandomSurvivalForest(random_state=config.rf_seed, n_jobs=-1),
         param_grid=_PARAM_GRID,
@@ -56,5 +56,5 @@ def search_rsf(X_train, y_train, X_val, t_val, e_val) -> tuple:
     best = search.best_estimator_
     # RSF.predict renvoie un score de risque (croissant avec le risque) :
     # c_index attend un score de risque et applique lui-même la négation.
-    val_c = c_index(best.predict(X_val), t_val, e_val.astype(float))
-    return best, val_c, search.best_params_
+    test_c = c_index(best.predict(X_test), t_test, e_test.astype(float))
+    return best, test_c, search.best_params_
