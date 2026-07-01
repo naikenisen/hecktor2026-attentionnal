@@ -4,8 +4,8 @@ nnunetv2
 nibabel
 SimpleITK
 scikit-image
-numpy<2.0
-pandas<2.0
+numpy
+pandas
 lifelines
 scikit-learn
 scikit-survival
