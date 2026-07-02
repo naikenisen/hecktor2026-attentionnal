@@ -52,19 +52,17 @@ clean = raw.drop(columns=["T-stage", "N-stage"]).dropna().reset_index(drop=True)
 clean.to_csv(CLEAN_CSV_PATH, index=False)
 
 
-# Training
+# chargemennt du dataset
 df = pd.read_csv(CLEAN_CSV_PATH)
 train = df[df["split"] == "train"]
 test = df[df["split"] == "test"]
-
-# scaler/encoder fittés sur train uniquement, appliqués à train et test.
 scaler = StandardScaler().fit(train[[AGE_COLUMN]])
 encoder = OneHotEncoder(handle_unknown="ignore").fit(train[BASE_COLUMNS])
 X_train = np.hstack([scaler.transform(train[[AGE_COLUMN]]), encoder.transform(train[BASE_COLUMNS]).toarray()])
 X_test = np.hstack([scaler.transform(test[[AGE_COLUMN]]), encoder.transform(test[BASE_COLUMNS]).toarray()])
-
 y_train = Surv.from_arrays(event=train["Relapse"].astype(bool), time=train["RFS"])
 
+# Training
 folds = list(StratifiedKFold(3, shuffle=True, random_state=RF_SEED).split(X_train, y_train["event"]))
 search = GridSearchCV(
     RandomSurvivalForest(random_state=RF_SEED, n_jobs=-1),
@@ -72,11 +70,10 @@ search = GridSearchCV(
 )
 search.fit(X_train, y_train)
 model = search.best_estimator_
-
 t_train, e_train = train["RFS"].to_numpy(float), train["Relapse"].to_numpy(float)
 t_test, e_test = test["RFS"].to_numpy(float), test["Relapse"].to_numpy(float)
 c_train = c_index(model.predict(X_train), t_train, e_train)
 risk_test = model.predict(X_test)
 c_test = c_index(risk_test, t_test, e_test)
 lo, hi = bootstrap_c_index(risk_test, t_test, e_test)
-print(f"train {c_train:.4f}  |  test {c_test:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
+print(f"train {c_train:.4f}, test {c_test:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
