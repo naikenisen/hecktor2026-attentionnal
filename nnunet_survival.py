@@ -1,8 +1,3 @@
-"""Phase 2 — survie sans rechute par RandomSurvivalForest sur le bottleneck nnU-Net.
-
-Même source d'embedding que `tn` (features de `tables/bottleneck.csv`, produites par
-`seg.extract`), mais cible de survie (événement, RFS) au lieu des stades T/N.
-"""
 import numpy as np
 import pandas as pd
 from sksurv.util import Surv

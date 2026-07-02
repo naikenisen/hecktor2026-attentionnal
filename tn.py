@@ -1,12 +1,3 @@
-"""Phase 2 — prédiction des stades T et N par RandomForest sur l'embedding TEP/CT figé.
-
-Aucune fusion de données : on n'utilise que l'embedding du bottleneck de l'encodeur nnU-Net
-(moyenne + max global), jamais les variables cliniques tabulaires. Un RandomForest distinct
-est entraîné pour T et pour N, avec recherche par grille (GridSearchCV) sur le split de test.
-
-Les features sont lues dans `tables/bottleneck.csv` (produit par `seg.extract`) : aucune
-extraction ici.
-"""
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
