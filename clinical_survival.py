@@ -50,17 +50,14 @@ def bootstrap_c_index(risk_scores, times, events, n=1000, seed=42) -> tuple[floa
     return float(np.percentile(samples, 2.5)), float(np.percentile(samples, 97.5))
 
 
-# === étape 1 : preprocessing ===
+# Preprocessing
 raw = pd.read_csv(CSV_PATH)
 clean = raw.dropna().reset_index(drop=True)
-n_events = int(clean["Relapse"].sum())
-os.makedirs(os.path.dirname(CLEAN_CSV_PATH) or ".", exist_ok=True)
 clean.to_csv(CLEAN_CSV_PATH, index=False)
 
 
-# === étape 2 : entraînement ===
+# Training
 df = pd.read_csv(CLEAN_CSV_PATH)
-df = df[df["RFS"] > 0]
 
 for label, use_tn in [("without TN", False), ("with TN   ", True)]:
     cat_columns = BASE_COLUMNS + (TN_COLUMNS if use_tn else [])
