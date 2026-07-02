@@ -5,7 +5,7 @@ __pycache__/
 
 # Données sources et sorties d'un run (jamais versionnées ; results/ est archivé à la main)
 results/
-
+dataset/
 # Divers
 *.log
 .DS_Store
