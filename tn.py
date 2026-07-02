@@ -10,8 +10,8 @@ from sklearn.metrics import balanced_accuracy_score
 CSV_PATH = "tables/HECKTOR_2026_training_data.csv"
 BOTTLENECK_CSV_PATH = "tables/bottleneck.csv"
 SEED = 42
-y = "T-stage"
-# y = "N-stage"
+# y = "T-stage"
+y = "N-stage"
 PARAM_GRID = {
     "C": [0.01, 0.03, 0.1, 0.3, 1, 3],
     "l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9],
@@ -39,7 +39,7 @@ X_test = scaler.transform(test[feature_cols]).astype(np.float32)
 folds = StratifiedKFold(3, shuffle=True, random_state=SEED)
 search = GridSearchCV(
     LogisticRegression(
-        penalty="elasticnet", solver="saga", class_weight="balanced",
+        solver="saga", class_weight="balanced",
         max_iter=5000, random_state=SEED,
     ),
     PARAM_GRID, scoring="balanced_accuracy", cv=folds, refit=True, n_jobs=-1,
