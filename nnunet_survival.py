@@ -1,3 +1,5 @@
+# standardisation (z-score) + PCA + RFS
+
 import numpy as np
 import pandas as pd
 from sksurv.util import Surv

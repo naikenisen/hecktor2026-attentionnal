@@ -1,3 +1,5 @@
+# standardisation (z-score) + logistic elastic-net
+
 import numpy as np
 import pandas as pd
 from sklearn.svm import SVC
@@ -8,10 +10,10 @@ from sklearn.metrics import balanced_accuracy_score
 CSV_PATH = "tables/HECKTOR_2026_training_data.csv"
 BOTTLENECK_CSV_PATH = "tables/bottleneck.csv"
 SEED = 42
-y = "T-stage"  # ou "N-stage"
-
+y = "T-stage"
+# y = "N-stage"
 PARAM_GRID = {
-    "C": [0.1, 1, 10, 100],
+    "C": [0.0001, 0.001, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06],
     "kernel": ["linear", "rbf"],
     "gamma": ["scale", "auto"],
 }
@@ -23,6 +25,7 @@ df = pd.read_csv(BOTTLENECK_CSV_PATH)
 df["PatientID"] = df["PatientID"].astype(str)
 df = df.merge(patients[["PatientID", "split", y]], on="PatientID", how="inner")
 df = df.dropna(subset=[y])
+df = df[df[y] != "T0"]
 feature_cols = [c for c in df.columns if c.startswith("feat_")]
 train = df[df["split"] == "train"]
 test = df[df["split"] == "test"]
