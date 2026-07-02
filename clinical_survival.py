@@ -1,9 +1,3 @@
-"""Phase 2 — survie sans rechute par RandomSurvivalForest sur les données cliniques.
-
-Étape 1 : génération du dataset nettoyé (dropna) → tables/clinical_clean.csv
-Étape 2 : entraînement de deux RSF (sans TN / avec TN oracle) et report du c-index test.
-Treatment est toujours inclus.
-"""
 import os
 import numpy as np
 import pandas as pd
