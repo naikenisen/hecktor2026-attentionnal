@@ -41,7 +41,6 @@ def c_index(risk_scores, times, events) -> float:
 
 
 def bootstrap_c_index(risk_scores, times, events, n=1000, seed=42) -> tuple[float, float]:
-    """IC 95% du c-index par bootstrap (percentile method). Retourne (ci_low, ci_high)."""
     rng = np.random.default_rng(seed)
     idx = np.arange(len(times))
     samples = [
@@ -55,13 +54,8 @@ def bootstrap_c_index(risk_scores, times, events, n=1000, seed=42) -> tuple[floa
 raw = pd.read_csv(CSV_PATH)
 clean = raw.dropna().reset_index(drop=True)
 n_events = int(clean["Relapse"].sum())
-print(f"preprocess : {len(raw)} → {len(clean)} patients "
-      f"({len(raw) - len(clean)} dropped for missing values)")
-print(f"            events={n_events}  censored={len(clean) - n_events}  "
-      f"event_rate={n_events / len(clean) * 100:.1f}%")
 os.makedirs(os.path.dirname(CLEAN_CSV_PATH) or ".", exist_ok=True)
 clean.to_csv(CLEAN_CSV_PATH, index=False)
-print(f"            saved → {CLEAN_CSV_PATH}")
 
 
 # === étape 2 : entraînement ===
