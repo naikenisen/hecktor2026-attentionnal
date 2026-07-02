@@ -1,67 +1,48 @@
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.svm import SVC
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import balanced_accuracy_score
 
 CSV_PATH = "tables/HECKTOR_2026_training_data.csv"
 BOTTLENECK_CSV_PATH = "tables/bottleneck.csv"
-RF_SEED = 42
-
-T_STAGES = ["T1", "T2", "T3", "T4"]
-N_STAGES = ["N0", "N1", "N2", "N3"]
-UNKNOWN_STAGE = -1
+SEED = 42
+y = "T-stage"  # ou "N-stage"
 
 PARAM_GRID = {
-    "n_estimators": [300, 600],
-    "max_depth": [5, 10, 20, None],
-    "max_features": ["sqrt", "log2"],
-    "min_samples_leaf": [1, 2, 4],
+    "svc__C": [0.1, 1, 10, 100],
+    "svc__kernel": ["linear", "rbf"],
+    "svc__gamma": ["scale", "auto"],
 }
 
-
-def stage_index(values: pd.Series, stages: list) -> pd.Series:
-    label = values.astype(str).str.strip().str.upper()
-    label = label.where(~label.str.startswith("N2"), "N2")  # N2a/N2b/N2c → N2
-    return label.map({s: i for i, s in enumerate(stages)}).fillna(UNKNOWN_STAGE).astype(int)
-
-
-# Chargement : jointure bottleneck ↔ CSV patients, encodage des stades T/N.
+# Jointure et préprocessing
 patients = pd.read_csv(CSV_PATH)
 patients["PatientID"] = patients["PatientID"].astype(str)
 df = pd.read_csv(BOTTLENECK_CSV_PATH)
 df["PatientID"] = df["PatientID"].astype(str)
-df = df.merge(patients[["PatientID", "split", "T-stage", "N-stage"]], on="PatientID", how="inner")
-df["t_label"] = stage_index(df["T-stage"], T_STAGES)
-df["n_label"] = stage_index(df["N-stage"], N_STAGES)
-
+df = df.merge(patients[["PatientID", "split", y]], on="PatientID", how="inner")
+df = df.dropna(subset=[y])
 feature_cols = [c for c in df.columns if c.startswith("feat_")]
 train = df[df["split"] == "train"]
 test = df[df["split"] == "test"]
-print(f"loaded {len(train)} train and {len(test)} test embeddings (dim {len(feature_cols)})")
+print(f"[{y}] {len(train)} train / {len(test)} test labelled samples")
+X_train = train[feature_cols].to_numpy(np.float32)
+X_test = test[feature_cols].to_numpy(np.float32)
+y_train = train[y].to_numpy()
+y_test = test[y].to_numpy()
 
-scores = {}
-for field in ("t_label", "n_label"):
-    tr = train[train[field] >= 0]
-    te = test[test[field] >= 0]
-    print(f"[{field}] {len(tr)} train / {len(te)} test labelled samples")
-    if len(tr) == 0 or len(te) == 0:
-        print(f"[{field}] pas assez de labels — ignoré")
-        scores[field] = 0.0
-        continue
+# training
+pipe = Pipeline([
+    ("scaler", StandardScaler()),
+    ("svc", SVC(class_weight="balanced", random_state=SEED)),
+])
+folds = StratifiedKFold(3, shuffle=True, random_state=SEED)
+search = GridSearchCV(pipe, PARAM_GRID, scoring="balanced_accuracy", cv=folds, refit=True, n_jobs=-1)
+search.fit(X_train, y_train)
+test_score = balanced_accuracy_score(y_test, search.predict(X_test))
 
-    # PredefinedSplit : le train reçoit -1, le test reçoit 0.
-    X = np.concatenate([tr[feature_cols], te[feature_cols]]).astype(np.float32)
-    y = np.concatenate([tr[field], te[field]])
-    test_fold = np.concatenate([np.full(len(tr), -1), np.zeros(len(te))])
-
-    search = GridSearchCV(
-        RandomForestClassifier(class_weight="balanced", random_state=RF_SEED, n_jobs=-1),
-        PARAM_GRID, scoring="balanced_accuracy", cv=PredefinedSplit(test_fold),
-        refit=False, n_jobs=1,
-    )
-    search.fit(X, y)
-    print(f"[{field}] best balanced accuracy {search.best_score_:.4f}")
-    print(f"[{field}] best params {search.best_params_}")
-    scores[field] = float(search.best_score_)
-
-print(f"\nT balanced accuracy {scores['t_label']:.4f} | N balanced accuracy {scores['n_label']:.4f}")
+print(f"[{y}] best CV balanced accuracy {search.best_score_:.4f}")
+print(f"[{y}] best params {search.best_params_}")
+print(f"[{y}] test balanced accuracy {test_score:.4f}")
