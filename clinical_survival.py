@@ -22,8 +22,6 @@ BASE_COLUMNS = [
     "HPV Status",
     "Treatment",
 ]
-TN_COLUMNS = ["T-stage", "N-stage"]
-
 PARAM_GRID = {
     "rsf__n_estimators": [300, 600],
     "rsf__max_depth": [5, 10, 20, None],
@@ -52,36 +50,34 @@ def bootstrap_c_index(risk_scores, times, events, n=1000, seed=42) -> tuple[floa
 
 # Preprocessing
 raw = pd.read_csv(CSV_PATH)
-clean = raw.dropna().reset_index(drop=True)
+clean = raw.drop(columns=["T-stage", "N-stage"]).dropna().reset_index(drop=True)
 clean.to_csv(CLEAN_CSV_PATH, index=False)
 
 
 # Training
 df = pd.read_csv(CLEAN_CSV_PATH)
 
-for label, use_tn in [("without TN", False), ("with TN   ", True)]:
-    cat_columns = BASE_COLUMNS + (TN_COLUMNS if use_tn else [])
-    feature_columns = [AGE_COLUMN] + cat_columns
-    train = df[df["split"] == "train"]
-    test = df[df["split"] == "test"]
-    y_train = Surv.from_arrays(event=train["Relapse"].astype(bool), time=train["RFS"])
+feature_columns = [AGE_COLUMN] + BASE_COLUMNS
+train = df[df["split"] == "train"]
+test = df[df["split"] == "test"]
+y_train = Surv.from_arrays(event=train["Relapse"].astype(bool), time=train["RFS"])
 
-    pipe = Pipeline([
-        ("pre", ColumnTransformer([
-            ("age", StandardScaler(), [AGE_COLUMN]),
-            ("cat", OneHotEncoder(handle_unknown="ignore"), cat_columns),
-        ])),
-        ("rsf", RandomSurvivalForest(random_state=RF_SEED, n_jobs=-1)),
-    ])
-    folds = list(StratifiedKFold(3, shuffle=True, random_state=RF_SEED).split(train, y_train["event"]))
-    search = GridSearchCV(pipe, PARAM_GRID, cv=folds, error_score=0.0, refit=True, n_jobs=1)
-    search.fit(train[feature_columns], y_train)
-    model = search.best_estimator_
+pipe = Pipeline([
+    ("pre", ColumnTransformer([
+        ("age", StandardScaler(), [AGE_COLUMN]),
+        ("cat", OneHotEncoder(handle_unknown="ignore"), BASE_COLUMNS),
+    ])),
+    ("rsf", RandomSurvivalForest(random_state=RF_SEED, n_jobs=-1)),
+])
+folds = list(StratifiedKFold(3, shuffle=True, random_state=RF_SEED).split(train, y_train["event"]))
+search = GridSearchCV(pipe, PARAM_GRID, cv=folds, error_score=0.0, refit=True, n_jobs=1)
+search.fit(train[feature_columns], y_train)
+model = search.best_estimator_
 
-    t_train, e_train = train["RFS"].to_numpy(float), train["Relapse"].to_numpy(float)
-    t_test, e_test = test["RFS"].to_numpy(float), test["Relapse"].to_numpy(float)
-    c_train = c_index(model.predict(train[feature_columns]), t_train, e_train)
-    risk_test = model.predict(test[feature_columns])
-    c_test = c_index(risk_test, t_test, e_test)
-    lo, hi = bootstrap_c_index(risk_test, t_test, e_test)
-    print(f"{label} : train {c_train:.4f}  |  test {c_test:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
+t_train, e_train = train["RFS"].to_numpy(float), train["Relapse"].to_numpy(float)
+t_test, e_test = test["RFS"].to_numpy(float), test["Relapse"].to_numpy(float)
+c_train = c_index(model.predict(train[feature_columns]), t_train, e_train)
+risk_test = model.predict(test[feature_columns])
+c_test = c_index(risk_test, t_test, e_test)
+lo, hi = bootstrap_c_index(risk_test, t_test, e_test)
+print(f"train {c_train:.4f}  |  test {c_test:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
