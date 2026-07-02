@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from sklearn.svm import SVC
-from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.metrics import balanced_accuracy_score
@@ -12,9 +11,9 @@ SEED = 42
 y = "T-stage"  # ou "N-stage"
 
 PARAM_GRID = {
-    "svc__C": [0.1, 1, 10, 100],
-    "svc__kernel": ["linear", "rbf"],
-    "svc__gamma": ["scale", "auto"],
+    "C": [0.1, 1, 10, 100],
+    "kernel": ["linear", "rbf"],
+    "gamma": ["scale", "auto"],
 }
 
 # Jointure et préprocessing
@@ -28,18 +27,18 @@ feature_cols = [c for c in df.columns if c.startswith("feat_")]
 train = df[df["split"] == "train"]
 test = df[df["split"] == "test"]
 print(f"[{y}] {len(train)} train / {len(test)} test labelled samples")
-X_train = train[feature_cols].to_numpy(np.float32)
-X_test = test[feature_cols].to_numpy(np.float32)
 y_train = train[y].to_numpy()
 y_test = test[y].to_numpy()
+scaler = StandardScaler().fit(train[feature_cols])
+X_train = scaler.transform(train[feature_cols]).astype(np.float32)
+X_test = scaler.transform(test[feature_cols]).astype(np.float32)
 
 # training
-pipe = Pipeline([
-    ("scaler", StandardScaler()),
-    ("svc", SVC(class_weight="balanced", random_state=SEED)),
-])
 folds = StratifiedKFold(3, shuffle=True, random_state=SEED)
-search = GridSearchCV(pipe, PARAM_GRID, scoring="balanced_accuracy", cv=folds, refit=True, n_jobs=-1)
+search = GridSearchCV(
+    SVC(class_weight="balanced", random_state=SEED),
+    PARAM_GRID, scoring="balanced_accuracy", cv=folds, refit=True, n_jobs=-1,
+)
 search.fit(X_train, y_train)
 test_score = balanced_accuracy_score(y_test, search.predict(X_test))
 
