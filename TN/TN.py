@@ -27,6 +27,7 @@ from scipy.spatial.distance import pdist
 
 MASKS_DIR = "dataset/dataset_masks"                     # dossier contenant un sous-dossier par patient
 OUTPUT_CSV = "tables/tn_from_mask.csv"
+TRUTH_CSV = "tables/HECKTOR_2026_training_data.csv"     # vérité terrain (T-stage, N-stage)
 GTVP_LABEL = 1                            # tumeur primaire dans le masque HECKTOR
 GTVN_LABEL = 2                            # ganglions dans le masque HECKTOR
 
@@ -80,6 +81,15 @@ for patient_id in sorted(os.listdir(MASKS_DIR)):
     rows.append({"PatientID": patient_id, "T": t_stage, "N": n})
     print(f"{patient_id}: tumeur {diameter:.1f} mm → {t_stage} | {n}")
 
+pred = pd.DataFrame(rows)
 os.makedirs(os.path.dirname(OUTPUT_CSV) or ".", exist_ok=True)
-pd.DataFrame(rows).to_csv(OUTPUT_CSV, index=False)
-print(f"\n{len(rows)} patients → {OUTPUT_CSV}")
+pred.to_csv(OUTPUT_CSV, index=False)
+print(f"\n{len(pred)} patients → {OUTPUT_CSV}")
+
+# Comparaison à la vérité terrain (T-stage, N-stage).
+truth = pd.read_csv(TRUTH_CSV)[["PatientID", "T-stage", "N-stage"]]
+merged = pred.merge(truth, on="PatientID", how="inner")
+for pred_col, truth_col in [("T", "T-stage"), ("N", "N-stage")]:
+    labelled = merged.dropna(subset=[truth_col])
+    accuracy = (labelled[pred_col] == labelled[truth_col]).mean()
+    print(f"{pred_col} accuracy {accuracy:.4f} ({len(labelled)} patients labellisés)")
