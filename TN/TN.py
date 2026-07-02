@@ -1,0 +1,85 @@
+"""Prédiction des stades T et N à partir du seul masque de segmentation (pas d'apprentissage).
+
+Parcourt un dossier `MASKS_DIR/<PatientID>/<PatientID>.nii.gz` (même arborescence que celle
+lue par `seg`) et mesure la géométrie des structures annotées (GTVp = tumeur primaire = label 1,
+GTVn = ganglions = label 2) en coordonnées physiques (mm).
+
+Stade T — diamètre maximal 3D de la tumeur primaire :
+    ≤ 2 cm        → T1
+    2 cm < d ≤ 4 cm → T2
+    > 4 cm        → T3
+
+Stade N — ganglions (composantes connexes de GTVn) :
+    aucun ganglion        → N0
+    un ganglion > 6 cm    → N3   (uni ou bilatéral)
+    ganglions bilatéraux  → N2
+    ganglions unilatéraux → N1
+
+Écrit un CSV `PatientID, T, N`.
+"""
+import os
+import numpy as np
+import pandas as pd
+import nibabel as nib
+from scipy.ndimage import label as connected_components
+from scipy.spatial import ConvexHull
+from scipy.spatial.distance import pdist
+
+MASKS_DIR = "dataset/dataset_masks"                     # dossier contenant un sous-dossier par patient
+OUTPUT_CSV = "tables/tn_from_mask.csv"
+GTVP_LABEL = 1                            # tumeur primaire dans le masque HECKTOR
+GTVN_LABEL = 2                            # ganglions dans le masque HECKTOR
+
+
+def max_diameter_mm(mask: np.ndarray, affine: np.ndarray) -> float:
+    """Plus grande distance (mm) entre deux voxels de la structure, en coordonnées physiques."""
+    coords = np.argwhere(mask)
+    if len(coords) < 2:
+        return 0.0
+    points = nib.affines.apply_affine(affine, coords)
+    if len(points) > 3:
+        try:
+            points = points[ConvexHull(points).vertices]  # ne garder que l'enveloppe
+        except Exception:
+            pass
+    return float(pdist(points).max())
+
+
+def n_stage(gtvn: np.ndarray, affine: np.ndarray) -> str:
+    """Stade N d'après les ganglions : latéralité (côté du plan médian sagittal) et taille."""
+    if gtvn.sum() == 0:
+        return "N0"
+    lr_axis = next(i for i, c in enumerate(nib.aff2axcodes(affine)) if c in "LR")
+    midline = gtvn.shape[lr_axis] / 2
+    components, n = connected_components(gtvn)
+
+    sides, max_node = set(), 0.0
+    for k in range(1, n + 1):
+        node = components == k
+        coords = np.argwhere(node)
+        sides.add(coords[:, lr_axis].mean() < midline)   # True/False = deux côtés du plan médian
+        max_node = max(max_node, max_diameter_mm(node, affine))
+
+    if max_node > 60:
+        return "N3"
+    return "N2" if len(sides) > 1 else "N1"
+
+
+rows = []
+for patient_id in sorted(os.listdir(MASKS_DIR)):
+    mask_path = os.path.join(MASKS_DIR, patient_id, f"{patient_id}.nii.gz")
+    if not os.path.isfile(mask_path):
+        continue
+    img = nib.load(mask_path)
+    data = np.asarray(img.dataobj)
+
+    diameter = max_diameter_mm(data == GTVP_LABEL, img.affine)
+    t_stage = "T1" if diameter <= 20 else "T2" if diameter <= 40 else "T3"
+    n = n_stage(data == GTVN_LABEL, img.affine)
+
+    rows.append({"PatientID": patient_id, "T": t_stage, "N": n})
+    print(f"{patient_id}: tumeur {diameter:.1f} mm → {t_stage} | {n}")
+
+os.makedirs(os.path.dirname(OUTPUT_CSV) or ".", exist_ok=True)
+pd.DataFrame(rows).to_csv(OUTPUT_CSV, index=False)
+print(f"\n{len(rows)} patients → {OUTPUT_CSV}")
