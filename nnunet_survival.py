@@ -5,12 +5,14 @@ import pandas as pd
 from sksurv.util import Surv
 from sksurv.ensemble import RandomSurvivalForest
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from lifelines.utils import concordance_index
 
 CSV_PATH = "tables/HECKTOR_2026_training_data.csv"
 BOTTLENECK_CSV_PATH = "tables/bottleneck.csv"
 RF_SEED = 42
+PCA_VARIANCE = 0.95  # part de variance conservée par la PCA
 
 PARAM_GRID = {
     "n_estimators": [300, 600],
@@ -30,12 +32,14 @@ feature_cols = [c for c in df.columns if c.startswith("feat_")]
 train = df[df["split"] == "train"]
 test = df[df["split"] == "test"]
 print(f"nnU-Net survival: {len(train)} train / {len(test)} test patients ")
-X_train = train[feature_cols].to_numpy(np.float32)
-X_test = test[feature_cols].to_numpy(np.float32)
 y_train = Surv.from_arrays(event=train["Relapse"], time=train["RFS"])
+
+# scaler puis PCA, fittés sur train uniquement, appliqués à train et test.
 scaler = StandardScaler().fit(train[feature_cols])
-X_train = scaler.transform(train[feature_cols]).astype(np.float32)
-X_test = scaler.transform(test[feature_cols]).astype(np.float32)
+pca = PCA(n_components=PCA_VARIANCE, random_state=RF_SEED).fit(scaler.transform(train[feature_cols]))
+X_train = pca.transform(scaler.transform(train[feature_cols])).astype(np.float32)
+X_test = pca.transform(scaler.transform(test[feature_cols])).astype(np.float32)
+print(f"PCA: {len(feature_cols)} → {pca.n_components_} composantes ({PCA_VARIANCE:.0%} de variance)")
 
 # Training
 folds = list(StratifiedKFold(3, shuffle=True, random_state=RF_SEED).split(X_train, y_train["event"]))
