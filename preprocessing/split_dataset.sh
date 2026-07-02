@@ -15,9 +15,11 @@ set -euo pipefail
 CSV="tables/HECKTOR_2026_training_data.csv"
 DATASET="/lustre/fsn1/projects/rech/ehe/udq27fb/hecktor2026-attentionnal/dataset/hecktor_dataset_suv"
 
-# Résolution du CSV relatif à la racine du dépôt (répertoire du script)
+# Résolution du CSV relatif à la racine du dépôt (le script vit dans preprocessing/,
+# la racine est donc son répertoire parent).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -f "$CSV" ]] || CSV="$SCRIPT_DIR/$CSV"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+[[ -f "$CSV" ]] || CSV="$REPO_ROOT/$CSV"
 
 if [[ ! -f "$CSV" ]]; then
     echo "Erreur : CSV introuvable : $CSV" >&2
