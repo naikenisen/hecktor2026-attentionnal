@@ -2,7 +2,7 @@
 
 import numpy as np
 import pandas as pd
-from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.metrics import balanced_accuracy_score
@@ -13,9 +13,8 @@ SEED = 42
 y = "T-stage"
 # y = "N-stage"
 PARAM_GRID = {
-    "C": [0.0001, 0.001, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06],
-    "kernel": ["linear", "rbf"],
-    "gamma": ["scale", "auto"],
+    "C": [0.01, 0.03, 0.1, 0.3, 1, 3],
+    "l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9],
 }
 
 # Jointure et préprocessing
@@ -39,7 +38,10 @@ X_test = scaler.transform(test[feature_cols]).astype(np.float32)
 # training
 folds = StratifiedKFold(3, shuffle=True, random_state=SEED)
 search = GridSearchCV(
-    SVC(class_weight="balanced", random_state=SEED),
+    LogisticRegression(
+        penalty="elasticnet", solver="saga", class_weight="balanced",
+        max_iter=5000, random_state=SEED,
+    ),
     PARAM_GRID, scoring="balanced_accuracy", cv=folds, refit=True, n_jobs=-1,
 )
 search.fit(X_train, y_train)
