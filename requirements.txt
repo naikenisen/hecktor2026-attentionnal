@@ -14,3 +14,4 @@ tqdm
 einops
 optuna
 lighter_zoo
+simpleitk
