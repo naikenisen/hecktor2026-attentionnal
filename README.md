@@ -46,13 +46,14 @@ recherche d'hyperparamètres Optuna ni de retrain séparé**.
         ▼
   nnUNetV2Runner.plan_and_process()   ← empreinte + planification + prétraitement
         │
-        │ splits_final.json : fold 0 figé sur le split train/test du disque (mêmes patients
-        │ que la pipeline image — cohérence du split conservée)
+        │ seul le dossier train/ du disque est fourni à nnU-Net ; il tire lui-même son
+        │ propre split train/validation par CV interne (splits_final.json auto-généré) —
+        │ le test set n'intervient pas dans l'entraînement, il reste réservé à l'évaluation finale
         ▼
   nnUNetV2Runner.train_single_model("3d_fullres", fold=0)
         │   perte Dice+CE, deep supervision, SW inference — gérés par nnU-Net
         ▼
-  checkpoints nnU-Net + validation/summary.json (Dice par classe)
+  checkpoint_best.pth (meilleur Dice de validation) + validation/summary.json (Dice par classe)
   → results/nnUNet_results/Dataset001_HECKTOR/...
 ```
 

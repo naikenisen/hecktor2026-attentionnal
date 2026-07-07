@@ -1,5 +1,5 @@
 """Construction du jeu de données brut nnU-Net à partir des volumes CT/PET/masque déjà
-prétraités, et figement du split du projet.
+prétraités.
 
 On contourne `runner.convert_dataset()` (qui exige un unique volume multi-canaux par cas et
 renomme les patients en `case_N`) : on crée directement l'arborescence `imagesTr`/`labelsTr`
@@ -92,20 +92,3 @@ def prepare_raw_dataset(records: list) -> str:
         json.dump({"training": datalist, "testing": []}, f, indent=2)
     print(f"[nnunet] {len(records)} cas → {raw_dir}")
     return datalist_path
-
-
-def write_project_split(train_ids: list, test_ids: list, valid_case_ids: list):
-    """Fige le split train/test du disque en fold 0 du `splits_final.json` nnU-Net : la
-    validation nnU-Net porte alors exactement sur les mêmes patients (le split test) que le
-    reste de la pipeline. nnU-Net régénère une CV 5-fold s'il est absent. La clé `"val"` est
-    imposée par le schéma nnU-Net (c'est notre split test)."""
-    valid = set(valid_case_ids)
-    split = [{
-        "train": [c for c in train_ids if c in valid],
-        "val": [c for c in test_ids if c in valid],
-    }]
-    preprocessed_dir = os.path.join(config.nnunet_preprocessed_dir, config.nnunet_dataset_dir)
-    os.makedirs(preprocessed_dir, exist_ok=True)
-    with open(os.path.join(preprocessed_dir, "splits_final.json"), "w") as f:
-        json.dump(split, f, indent=2)
-    print(f"[nnunet] fold 0 figé : {len(split[0]['train'])} train / {len(split[0]['val'])} test")

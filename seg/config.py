@@ -30,9 +30,8 @@ nnunet_modality = ["CT", "PET"]                # ordre des canaux : 0 = CT, 1 = 
 nnunet_configuration = "3d_fullres"            # config nnU-Net entraînée
 nnunet_trainer = "nnUNetTrainer"               # ex. "nnUNetTrainer_250epochs" pour limiter les époques
 nnunet_plans = "nnUNetPlans"                   # nom des plans (défaut de l'experiment planner)
-nnunet_checkpoint = "checkpoint_final.pth"     # checkpoint (dans results/nnUNet_results) rechargé pour l'extraction d'embeddings
-nnunet_fold = 0
-nnunet_use_project_split = True                # fold 0 = split train/test du disque (cohérent avec le reste de la pipeline)
+nnunet_checkpoint = "checkpoint_best.pth"      # meilleur checkpoint (val Dice), rechargé pour l'extraction d'embeddings
+nnunet_fold = 0                                # fold de la CV interne nnU-Net (split train/val auto, sans le test)
 nnunet_gpu_memory_gb = 8                        # cible mémoire de l'experiment planner
 
 # Arborescence nnU-Net. `nnunet_raw` (liens symboliques, quasi vide) et `nnunet_preprocessed`
