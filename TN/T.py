@@ -4,11 +4,11 @@ Parcourt un dossier `MASKS_DIR/<PatientID>/<PatientID>.nii.gz` (même arborescen
 lue par `seg`) et mesure la géométrie de la tumeur primaire (GTVp = label 1) en coordonnées
 physiques (mm).
 
-Stade T — diamètre maximal 3D de la tumeur primaire :
-    no tumor  = T0
-    ≤ 2 cm    = T1
-    2 cm < d ≤ 4 cm = T2
-    > 4 cm    = T3
+Stade T — présence puis diamètre maximal 3D de la tumeur primaire :
+    aucun voxel de tumeur = T0
+    ≥ 1 voxel, ≤ 2 cm     = T1
+    2 cm < d ≤ 4 cm       = T2
+    > 4 cm                = T3
 
 Écrit un CSV `PatientID, T`.
 """
@@ -75,15 +75,12 @@ for patient_id in sorted(os.listdir(MASKS_DIR)):
     data = np.asarray(img.dataobj)
 
     gtvp = data == GTVP_LABEL
-    diameter = max_diameter_mm(gtvp, img.affine)
-    if gtvp.sum() == 0:
-        t_stage = "T0"                       # pas de tumeur primaire annotée
-    elif diameter <= 20:
-        t_stage = "T1"
-    elif diameter <= 40:
-        t_stage = "T2"
+    if not gtvp.any():
+        t_stage, diameter = "T0", 0.0        # aucun voxel de tumeur → T0
     else:
-        t_stage = "T3"
+        diameter = max_diameter_mm(gtvp, img.affine)
+        # présence d'au moins un voxel → T1 au minimum, puis seuils de taille
+        t_stage = "T1" if diameter <= 25 else "T2" if diameter <= 45 else "T3"
 
     rows.append({"PatientID": patient_id, "T": t_stage})
     print(f"{patient_id}: tumeur {diameter:.1f} mm → {t_stage}")
