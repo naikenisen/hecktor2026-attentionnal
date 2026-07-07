@@ -9,7 +9,6 @@ Stade T — diamètre maximal 3D de la tumeur primaire :
     ≤ 2 cm    = T1
     2 cm < d ≤ 4 cm = T2
     > 4 cm    = T3
-    IF HPV status = 1 and > 4 cm = T4
 
 Écrit un CSV `PatientID, T`.
 """
@@ -26,7 +25,7 @@ from sklearn.metrics import confusion_matrix
 
 MASKS_DIR = "dataset/dataset_masks"                     # dossier contenant un sous-dossier par patient
 OUTPUT_CSV = "tables/t_from_mask.csv"
-TRUTH_CSV = "tables/HECKTOR_2026_training_data.csv"     # vérité terrain (T-stage) et statut HPV
+TRUTH_CSV = "tables/HECKTOR_2026_training_data.csv"     # vérité terrain (T-stage)
 FIG_DIR = "figures"                                     # matrice de confusion (PNG)
 GTVP_LABEL = 1                            # tumeur primaire dans le masque HECKTOR
 
@@ -67,9 +66,6 @@ def plot_confusion(y_true, y_pred, labels, title, path):
     print(f"matrice de confusion → {path}")
 
 
-# Statut HPV par patient (clinique) : nécessaire pour distinguer T3 de T4.
-hpv_status = pd.read_csv(TRUTH_CSV).set_index("PatientID")["HPV Status"].to_dict()
-
 rows = []
 for patient_id in sorted(os.listdir(MASKS_DIR)):
     mask_path = os.path.join(MASKS_DIR, patient_id, f"{patient_id}.nii.gz")
@@ -86,8 +82,6 @@ for patient_id in sorted(os.listdir(MASKS_DIR)):
         t_stage = "T1"
     elif diameter <= 40:
         t_stage = "T2"
-    elif hpv_status.get(patient_id) == 1:    # > 4 cm ET HPV positif → T4
-        t_stage = "T4"
     else:
         t_stage = "T3"
 
@@ -99,8 +93,7 @@ os.makedirs(os.path.dirname(OUTPUT_CSV) or ".", exist_ok=True)
 pred.to_csv(OUTPUT_CSV, index=False)
 print(f"\n{len(pred)} patients → {OUTPUT_CSV}")
 
-# Comparaison à la vérité terrain (T-stage).
-# T4 distingué de T3 via le statut HPV ; classes évaluées : T0..T4.
+# Comparaison à la vérité terrain (T-stage). Classes évaluées : T0..T3.
 truth = pd.read_csv(TRUTH_CSV)[["PatientID", "T-stage"]]
 merged = pred.merge(truth, on="PatientID", how="inner")
 os.makedirs(FIG_DIR, exist_ok=True)
