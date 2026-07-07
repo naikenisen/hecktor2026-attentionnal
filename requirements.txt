@@ -6,6 +6,8 @@ SimpleITK
 scikit-image
 numpy
 pandas
+scipy
+matplotlib
 lifelines
 scikit-learn
 scikit-survival
