@@ -4,12 +4,9 @@ __pycache__/
 *.pyc
 
 # Données sources et sorties d'un run (jamais versionnées ; results/ est archivé à la main)
-dataset/
+
 # Divers
 *.log
 .DS_Store
 .vscode/
 .idea/
-
-# Intermediate generated tables
-/dataset
