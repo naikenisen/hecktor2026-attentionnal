@@ -5,15 +5,17 @@ lue par `seg`) et mesure la géométrie des structures annotées (GTVp = tumeur 
 GTVn = ganglions = label 2) en coordonnées physiques (mm).
 
 Stade T — diamètre maximal 3D de la tumeur primaire :
-    ≤ 2 cm        → T1
-    2 cm < d ≤ 4 cm → T2
-    > 4 cm        → T3
+    no tumor  = T0
+    ≤ 2 cm    = T1
+    2 cm < d ≤ 4 cm = T2
+    > 4 cm    = T3
+    IF HPV status = 1 and > 4 cm = T4
 
 Stade N — ganglions (composantes connexes de GTVn) :
-    aucun ganglion        → N0
-    un ganglion > 6 cm    → N3   (uni ou bilatéral)
-    ganglions bilatéraux  → N2
-    ganglions unilatéraux → N1
+    aucun ganglion                                    → N0
+    ganglions ipsilatéraux (même côté que la tumeur)  → N1
+    ganglions controlatéraux ou bilatéraux            → N2
+    un ganglion > 6 cm                                → N3   (uni ou bilatéral)
 
 Écrit un CSV `PatientID, T, N`.
 """
@@ -51,8 +53,22 @@ def max_diameter_mm(mask: np.ndarray, affine: np.ndarray) -> float:
     return float(pdist(points).max())
 
 
-def n_stage(gtvn: np.ndarray, affine: np.ndarray) -> str:
-    """Stade N d'après les ganglions : latéralité (côté du plan médian sagittal) et taille."""
+def tumor_side(gtvp: np.ndarray, affine: np.ndarray):
+    """Côté de la tumeur primaire (True/False = deux côtés du plan médian sagittal), ou None si absente."""
+    if gtvp.sum() == 0:
+        return None
+    lr_axis = next(i for i, c in enumerate(nib.aff2axcodes(affine)) if c in "LR")
+    midline = gtvp.shape[lr_axis] / 2
+    return np.argwhere(gtvp)[:, lr_axis].mean() < midline
+
+
+def n_stage(gtvn: np.ndarray, affine: np.ndarray, t_side) -> str:
+    """Stade N d'après les ganglions : latéralité (relative à la tumeur) et taille.
+
+    N3 si un ganglion > 6 cm ; sinon N1 si tous les ganglions sont ipsilatéraux
+    (même côté que la tumeur), N2 s'il y en a de controlatéraux ou des deux côtés.
+    Si le côté de la tumeur est inconnu (pas de GTVp), on retombe sur bilatéral → N2.
+    """
     if gtvn.sum() == 0:
         return "N0"
     lr_axis = next(i for i, c in enumerate(nib.aff2axcodes(affine)) if c in "LR")
@@ -68,7 +84,10 @@ def n_stage(gtvn: np.ndarray, affine: np.ndarray) -> str:
 
     if max_node > 60:
         return "N3"
-    return "N2" if len(sides) > 1 else "N1"
+    if t_side is None:                       # côté de la tumeur inconnu : bilatéral → N2, sinon N1
+        return "N2" if len(sides) > 1 else "N1"
+    # ipsilatéral seulement (uniquement le côté de la tumeur) → N1 ; controlatéral ou bilatéral → N2
+    return "N1" if sides == {t_side} else "N2"
 
 
 def plot_confusion(y_true, y_pred, labels, title, path):
@@ -93,6 +112,9 @@ def plot_confusion(y_true, y_pred, labels, title, path):
     print(f"matrice de confusion → {path}")
 
 
+# Statut HPV par patient (clinique) : nécessaire pour distinguer T3 de T4.
+hpv_status = pd.read_csv(TRUTH_CSV).set_index("PatientID")["HPV Status"].to_dict()
+
 rows = []
 for patient_id in sorted(os.listdir(MASKS_DIR)):
     mask_path = os.path.join(MASKS_DIR, patient_id, f"{patient_id}.nii.gz")
@@ -105,9 +127,15 @@ for patient_id in sorted(os.listdir(MASKS_DIR)):
     diameter = max_diameter_mm(gtvp, img.affine)
     if gtvp.sum() == 0:
         t_stage = "T0"                       # pas de tumeur primaire annotée
+    elif diameter <= 20:
+        t_stage = "T1"
+    elif diameter <= 40:
+        t_stage = "T2"
+    elif hpv_status.get(patient_id) == 1:    # > 4 cm ET HPV positif → T4
+        t_stage = "T4"
     else:
-        t_stage = "T1" if diameter <= 20 else "T2" if diameter <= 40 else "T3"
-    n = n_stage(data == GTVN_LABEL, img.affine)
+        t_stage = "T3"
+    n = n_stage(data == GTVN_LABEL, img.affine, tumor_side(gtvp, img.affine))
 
     rows.append({"PatientID": patient_id, "T": t_stage, "N": n})
     print(f"{patient_id}: tumeur {diameter:.1f} mm → {t_stage} | {n}")
@@ -118,7 +146,7 @@ pred.to_csv(OUTPUT_CSV, index=False)
 print(f"\n{len(pred)} patients → {OUTPUT_CSV}")
 
 # Comparaison à la vérité terrain (T-stage, N-stage).
-# T3/T4 regroupés (la géométrie plafonne à T3) → classes évaluées : T0, T1, T2, T3.
+# T4 distingué de T3 via le statut HPV ; classes évaluées : T0..T4 et N0..N3.
 truth = pd.read_csv(TRUTH_CSV)[["PatientID", "T-stage", "N-stage"]]
 merged = pred.merge(truth, on="PatientID", how="inner")
 os.makedirs(FIG_DIR, exist_ok=True)
