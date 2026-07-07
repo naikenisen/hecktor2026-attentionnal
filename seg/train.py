@@ -8,8 +8,10 @@ nnU-Net est auto-configurant : il dérive patch size, batch size, normalisation 
 augmentation de l'empreinte du jeu de données. Il n'y a donc ni recherche d'hyperparamètres
 ni retrain séparé — cette phase est complète à elle seule.
 
-Orchestration : split train/test du disque → arborescence brute nnU-Net → plan_and_process →
-fige le split du projet en fold 0 → entraîne 3d_fullres → reporte le Dice de validation.
+Orchestration : dossier train du disque → arborescence brute nnU-Net → plan_and_process →
+entraîne 3d_fullres (nnU-Net tire lui-même son split train/validation par CV interne, sans le
+test) → reporte le Dice de validation. Le test set n'intervient pas dans cette phase — il reste
+réservé à l'évaluation finale.
 
 L'extraction du bottleneck de l'encodeur fait l'objet d'un script SÉPARÉ, `seg.extract`, à
 lancer ensuite (`python -m seg.extract`).
@@ -18,7 +20,7 @@ import os
 import pandas as pd
 from . import config
 from .split import case_ids
-from seg.dataset import build_records, prepare_raw_dataset, write_project_split
+from seg.dataset import build_records, prepare_raw_dataset
 from seg.runner import build_runner, plan_and_process, train_fold, report_validation
 
 
@@ -29,23 +31,15 @@ def main():
 
     known_patients = set(pd.read_csv(config.csv_path)["PatientID"])
     train_ids = case_ids(config, "train")
-    test_ids = case_ids(config, "test")
-    records = build_records({"train": train_ids, "test": test_ids}, known_patients)
-    valid_case_ids = [r[0] for r in records]
+    records = build_records({"train": train_ids}, known_patients)
 
     datalist_path = prepare_raw_dataset(records)
     runner = build_runner(datalist_path)
     plan_and_process(runner)
 
-    if config.nnunet_use_project_split:
-        if config.nnunet_fold != 0:
-            raise ValueError(
-                "nnunet_use_project_split=True impose nnunet_fold=0 (le projet n'a qu'un split)")
-        write_project_split(train_ids, test_ids, valid_case_ids)
-
     train_fold(runner)
     report_validation()
-    print(f"[nnunet] modèles sauvegardés dans {config.nnunet_results_dir}")
+    print(f"[nnunet] meilleur poids sauvegardé : {config.nnunet_model_dir}/fold_{config.nnunet_fold}/checkpoint_best.pth")
 
 
 if __name__ == "__main__":
