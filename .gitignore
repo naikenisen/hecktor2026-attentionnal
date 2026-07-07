@@ -14,3 +14,4 @@ results/
 
 # Intermediate generated tables
 tables/*_clean.csv
+/dataset
