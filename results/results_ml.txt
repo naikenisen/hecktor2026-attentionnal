@@ -1,0 +1,34 @@
+tn.py
+[T-stage] 621 train / 154 test labelled samples
+[T-stage] best CV balanced accuracy 0.4223
+[T-stage] best params {'C': 0.1, 'l1_ratio': 0.5}
+[T-stage] test balanced accuracy 0.3495
+
+[N-stage] 626 train / 156 test labelled samples
+[N-stage] best CV balanced accuracy 0.4582
+[N-stage] best params {'C': 0.01, 'l1_ratio': 0.5}
+[N-stage] test balanced accuracy 0.4434
+
+2025 - 0.5583
+
+nnunet_surival.py
+nnU-Net survival: 581 train / 146 test patients 
+PCA: 640 → 80 composantes (95% de variance)
+best c-index 0.5221
+best params {'max_depth': 20, 'max_features': 'log2', 'min_samples_leaf': 8, 'n_estimators': 600}
+
+clinical_survival.py
+train 0.7374, test 0.6854  95% CI [0.5745, 0.8030]
+
+2025 - 0.6582823259372609
+
+seg train.py
+Epoch 857
+Current learning rate: 0.00174
+train_loss -0.6041
+val_loss -0.5832
+Pseudo dice [0.7675, 0.7999]
+Epoch time: 25.32 s
+best EMA pseudo Dice: 0.7793
+
+2025 - GTVp DSC: 0.7418, GTVn Agg DSC: 0.7640, GTVn Agg F1: 0.647
