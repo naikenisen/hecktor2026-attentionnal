@@ -254,3 +254,40 @@ random.shuffle(single)
 sample = (multi + single)[:N_SAMPLE]
 print(f"planche : {min(len(multi), N_SAMPLE)} patients multi-amas + compléments mono-amas")
 plot_components(sample, t1, t2, os.path.join(FIG_DIR, "components_T.png"))
+
+
+
+
+
+# Function to determine T-stage from mask
+def t_from_mask(
+    segmentation_array: np.ndarray,
+    affine: np.ndarray,
+    spacing,
+    t1: float = 25.0,
+    t2: float = 45.0,
+) -> str:
+    """Renvoie le stade T à partir du tableau de segmentation.
+
+    Paramètres
+    ----------
+    segmentation_array : np.ndarray
+        Masque de segmentation (entiers) avec GTVP_LABEL=1 pour la tumeur primaire.
+    affine : np.ndarray
+        Matrice affine NIfTI (4×4) du volume — sert à convertir les coordonnées voxel en mm.
+    spacing : tuple[float, float, float]
+        Taille de voxel en mm sur chaque axe (img.header.get_zooms()[:3]).
+        Utilisée pour le seuil de fusion des trous < GAP_MM.
+    t1 : float
+        Seuil T1/T2 en mm (diamètre axial ≤ t1 → T1). Défaut : 25 mm.
+    t2 : float
+        Seuil T2/T3 en mm (t1 < diamètre ≤ t2 → T2, sinon T3). Défaut : 45 mm.
+
+    Retourne
+    --------
+    str : "T0", "T1", "T2" ou "T3"
+    """
+    gtvp = segmentation_array == GTVP_LABEL
+    diameter = largest_diameter_mm(gtvp, affine, spacing)
+    return stage_of(diameter, bool(gtvp.any()), t1, t2)
+

@@ -27,11 +27,16 @@ To save and upload:
 """
 
 import json
+import os
+import tempfile
 from glob import glob
 from pathlib import Path
 
 import SimpleITK
 import numpy as np
+
+from TN.T import t_from_mask
+from TN.N import n_stage, tumor_side
 
 INPUT_PATH = Path("/input")
 OUTPUT_PATH = Path("/output")
@@ -85,15 +90,65 @@ def run():
 # Subtask implementations — replace with your own model code
 # =============================================================================
 
+def _sitk_affine_zyx(sitk_image):
+    """4×4 affine mappant les indices numpy ZYX (depuis SimpleITK) vers les coordonnées monde en mm.
+
+    SimpleITK stocke ses axes en ordre (i, j, k) et les tableaux numpy sont en ordre ZYX
+    (k=axis0, j=axis1, i=axis2). On permute les colonnes de la direction pour que l'affine
+    mappe correctement (k_idx, j_idx, i_idx) → coordonnées physiques.
+    """
+    d = np.array(sitk_image.GetDirection()).reshape(3, 3)  # col[0]=dir_i, col[1]=dir_j, col[2]=dir_k
+    s = np.array(sitk_image.GetSpacing())                  # (si, sj, sk)
+    o = np.array(sitk_image.GetOrigin())
+    affine = np.eye(4, dtype=float)
+    affine[:3, 0] = d[:, 2] * s[2]   # axe numpy 0 → axe ITK k (crânio-caudal)
+    affine[:3, 1] = d[:, 1] * s[1]   # axe numpy 1 → axe ITK j (antéro-postérieur)
+    affine[:3, 2] = d[:, 0] * s[0]   # axe numpy 2 → axe ITK i (gauche-droite)
+    affine[:3, 3] = o
+    return affine
+
+
 def run_segmentation(ct_path, pet_path, ehr):
     """
-    Load your segmentation model from MODEL_PATH and run inference.
-    Returns a numpy array with labels: 0=background, 1=GTVp, 2=GTVn.
+    Charge le modèle nnUNet depuis MODEL_PATH et prédit la segmentation.
+    Retourne un tableau numpy ZYX avec les labels : 0=background, 1=GTVp, 2=GTVn.
     """
-    ct_image = SimpleITK.ReadImage(ct_path)
-    output_array = np.zeros(SimpleITK.GetArrayFromImage(ct_image).shape, dtype=np.uint8)
-    # TODO: replace with your segmentation model inference
-    return output_array
+    import torch
+    from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    model_folder = str(
+        MODEL_PATH / "Dataset001_HECKTOR" / "nnUNetTrainer__nnUNetPlans__3d_fullres"
+    )
+
+    predictor = nnUNetPredictor(
+        tile_step_size=0.5,
+        use_gaussian=True,
+        use_mirroring=True,
+        perform_everything_on_device=True,
+        device=device,
+        verbose=False,
+        verbose_preprocessing=False,
+        allow_tqdm=False,
+    )
+    predictor.initialize_from_trained_model_folder(
+        model_folder,
+        use_folds=(0,),
+        checkpoint_name="checkpoint_best.pth",
+    )
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_truncated = os.path.join(tmp_dir, "case")
+        predictor.predict_from_files(
+            [[str(ct_path), str(pet_path)]],
+            [out_truncated],
+            save_probabilities=False,
+            overwrite=True,
+            num_processes_preprocessing=1,
+            num_processes_segmentation_export=1,
+        )
+        seg_img = SimpleITK.ReadImage(out_truncated + ".nii.gz")
+        return SimpleITK.GetArrayFromImage(seg_img).astype(np.uint8)
 
 
 def run_tn_staging(ct_path, pet_path, ehr, segmentation_array):
@@ -102,10 +157,16 @@ def run_tn_staging(ct_path, pet_path, ehr, segmentation_array):
     Returns (t_stage: str, n_stage: str), e.g. ("T2", "N1").
     TN staging follows AJCC/UICC 7th Edition (N2b and N2c collapsed to N2).
     """
-    # TODO: replace with your TN staging model inference
-    t_stage = "T2"
-    n_stage = "N0"
-    return t_stage, n_stage
+    ct_image = SimpleITK.ReadImage(ct_path)
+    affine = _sitk_affine_zyx(ct_image)
+    spacing = ct_image.GetSpacing()                          # (sx, sy, sz) — seul min() est utilisé
+
+    gtvp = (segmentation_array == 1).astype(np.uint8)
+    gtvn = (segmentation_array == 2).astype(np.uint8)
+
+    t = t_from_mask(segmentation_array, affine, spacing)
+    n = n_stage(gtvn, affine, tumor_side(gtvp, affine))
+    return t, n
 
 
 def run_prognosis(ct_path, pet_path, ehr, segmentation_array, t_stage, n_stage):
