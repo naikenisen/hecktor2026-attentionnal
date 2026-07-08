@@ -167,41 +167,6 @@ def plot_confusion(y_true, y_pred, labels, title, path):
     print(f"matrice de confusion → {path}")
 
 
-def plot_components(patient_ids, t1, t2, path):
-    """Planche de contrôle : pour chaque patient, nuage 3D de TOUT le volume GTVp segmenté,
-    en coordonnées physiques (mm) et proportions réelles (aucun rescaling), une couleur par
-    composante (fusion des trous < GAP_MM). Titre : nb d'amas brut→fusion, diamètre max, stade."""
-    cmap = plt.get_cmap("tab10")
-    ncol = 5
-    nrow = int(np.ceil(len(patient_ids) / ncol))
-    fig = plt.figure(figsize=(3.2 * ncol, 3.2 * nrow))
-    for idx, patient_id in enumerate(patient_ids, start=1):
-        img = nib.load(os.path.join(MASKS_DIR, patient_id, f"{patient_id}.nii.gz"))
-        gtvp = np.asarray(img.dataobj) == GTVP_LABEL
-        spacing = img.header.get_zooms()[:3]
-        n_raw = connected_components(gtvp)[1]            # amas avant fusion des trous < GAP_MM
-        labels, n = tumor_components(gtvp, spacing)      # amas après fusion
-        diameter = max((max_axial_diameter_mm(labels == k, img.affine)
-                        for k in range(1, n + 1)), default=0.0)
-        t_stage = stage_of(diameter, gtvp.any(), t1, t2)
-
-        # tous les voxels segmentés → coordonnées physiques (mm), couleur = composante
-        coords = np.argwhere(labels > 0)
-        pts = nib.affines.apply_affine(img.affine, coords)
-        comp_ids = labels[tuple(coords.T)]
-
-        ax = fig.add_subplot(nrow, ncol, idx, projection="3d")
-        ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=2, marker="s",
-                   c=[cmap((c - 1) % 10) for c in comp_ids], depthshade=False)
-        # proportions réelles : box_aspect = étendue physique de chaque axe (pas de rescaling)
-        extent = pts.max(0) - pts.min(0)
-        ax.set_box_aspect(np.where(extent > 0, extent, 1))
-        ax.set_title(f"{patient_id}\n{n_raw}→{n} comp. · {diameter:.0f} mm · {t_stage}", fontsize=8)
-        ax.tick_params(labelsize=5)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    print(f"planche composantes → {path}")
 
 
 rows = []
@@ -257,10 +222,6 @@ random.shuffle(multi)
 random.shuffle(single)
 sample = (multi + single)[:N_SAMPLE]
 print(f"planche : {min(len(multi), N_SAMPLE)} patients multi-amas + compléments mono-amas")
-plot_components(sample, t1, t2, os.path.join(FIG_DIR, "components_T.png"))
-
-
-
 
 
 # Function to determine T-stage from mask
