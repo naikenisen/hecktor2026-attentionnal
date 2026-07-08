@@ -46,13 +46,29 @@ def max_diameter_mm(mask: np.ndarray, affine: np.ndarray) -> float:
     return float(pdist(points).max())
 
 
+def lr_axis(affine: np.ndarray) -> int:
+    """Index de l'axe gauche/droite d'après l'affine NIfTI."""
+    return next(i for i, c in enumerate(nib.aff2axcodes(affine)) if c in "LR")
+
+
+def midline_index(affine: np.ndarray, axis: int) -> float:
+    """Indice de voxel du plan médian sagittal (x = 0 mm en coordonnées monde).
+
+    Identique à la logique de viz_sagittal_simple : plutôt que le milieu du
+    tableau (shape/2), on prend le voxel dont la coordonnée physique le long de
+    l'axe G/D vaut 0. Sur une affine diagonale (garantie après réorientation
+    canonique) : coord(i) = affine[axis, axis] * i + affine[axis, 3].
+    """
+    return -affine[axis, 3] / affine[axis, axis]
+
+
 def tumor_side(gtvp: np.ndarray, affine: np.ndarray):
     """Côté de la tumeur primaire (True/False = deux côtés du plan médian sagittal), ou None si absente."""
     if gtvp.sum() == 0:
         return None
-    lr_axis = next(i for i, c in enumerate(nib.aff2axcodes(affine)) if c in "LR")
-    midline = gtvp.shape[lr_axis] / 2
-    return np.argwhere(gtvp)[:, lr_axis].mean() < midline
+    axis = lr_axis(affine)
+    midline = midline_index(affine, axis)
+    return np.argwhere(gtvp)[:, axis].mean() < midline
 
 
 def n_stage(gtvn: np.ndarray, affine: np.ndarray, t_side) -> str:
@@ -64,15 +80,15 @@ def n_stage(gtvn: np.ndarray, affine: np.ndarray, t_side) -> str:
     """
     if gtvn.sum() == 0:
         return "N0"
-    lr_axis = next(i for i, c in enumerate(nib.aff2axcodes(affine)) if c in "LR")
-    midline = gtvn.shape[lr_axis] / 2
+    axis = lr_axis(affine)
+    midline = midline_index(affine, axis)
     components, n = connected_components(gtvn)
 
     sides, max_node = set(), 0.0
     for k in range(1, n + 1):
         node = components == k
         coords = np.argwhere(node)
-        sides.add(coords[:, lr_axis].mean() < midline)   # True/False = deux côtés du plan médian
+        sides.add(coords[:, axis].mean() < midline)   # True/False = deux côtés du plan médian
         max_node = max(max_node, max_diameter_mm(node, affine))
 
     if max_node > 60:
@@ -110,7 +126,7 @@ for patient_id in sorted(os.listdir(MASKS_DIR)):
     mask_path = os.path.join(MASKS_DIR, patient_id, f"{patient_id}.nii.gz")
     if not os.path.isfile(mask_path):
         continue
-    img = nib.load(mask_path)
+    img = nib.as_closest_canonical(nib.load(mask_path))   # RAS canonique : axe 0 = G→D garanti
     data = np.asarray(img.dataobj)
 
     gtvp = data == GTVP_LABEL

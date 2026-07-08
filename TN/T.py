@@ -8,7 +8,7 @@ Stade T — présence puis diamètre maximal de la plus grande tumeur primaire. 
 mesuré à la convention radiologique : plus grande dimension *dans une coupe axiale* (et non la
 diagonale 3D du volume, qui sur-estime la taille et fait migrer les stades vers le haut).
 
-    aucun voxel de tumeur     = T0
+    aucun voxel de tumeur     = T1   (T0 n'est jamais prédit)
     ≥ 1 voxel, d ≤ T1_MAX     = T1
     T1_MAX < d ≤ T2_MAX       = T2
     d > T2_MAX                = T3
@@ -112,17 +112,21 @@ def largest_diameter_mm(gtvp: np.ndarray, affine: np.ndarray, spacing) -> float:
 
 
 def stage_of(diameter: float, has_tumor: bool, t1: float, t2: float) -> str:
-    """Stade T à partir du diamètre axial et des seuils ajustés (présence → T1 minimum)."""
+    """Stade T à partir du diamètre axial et des seuils ajustés.
+
+    On ne prédit jamais T0 : l'absence de voxel de tumeur est classée T1 (stade
+    minimal), au même titre qu'une petite tumeur segmentée.
+    """
     if not has_tumor:
-        return "T0"
+        return "T1"
     return "T1" if diameter <= t1 else "T2" if diameter <= t2 else "T3"
 
 
 def fit_thresholds(diameter, has_tumor, truth) -> tuple:
     """Cherche (T1_MAX, T2_MAX) maximisant l'accuracy T1/T2/T3 par recherche exhaustive.
 
-    T0 = absence de tumeur (indépendant des seuils) ; T4 (invasion) n'est pas atteignable et
-    reste compté comme erreur. Renvoie ((t1, t2), accuracy).
+    T0 n'est jamais prédit : l'absence de tumeur est classée T1. T4 (invasion) n'est pas
+    atteignable et reste compté comme erreur. Renvoie ((t1, t2), accuracy).
     """
     diameter = np.asarray(diameter, dtype=float)
     has_tumor = np.asarray(has_tumor, dtype=bool)
@@ -132,7 +136,7 @@ def fit_thresholds(diameter, has_tumor, truth) -> tuple:
         for t2 in T2_GRID:
             if t2 <= t1:
                 continue
-            pred = np.where(~has_tumor, "T0",
+            pred = np.where(~has_tumor, "T1",
                             np.where(diameter <= t1, "T1",
                                      np.where(diameter <= t2, "T2", "T3")))
             acc = (pred == truth).mean()
