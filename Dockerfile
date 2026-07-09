@@ -18,4 +18,6 @@ RUN python -m pip install \
 
 COPY --chown=user:user inference.py /opt/app/
 
+COPY ./TN ./TN
+
 ENTRYPOINT ["python", "inference.py"]

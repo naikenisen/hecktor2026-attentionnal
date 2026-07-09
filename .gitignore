@@ -13,3 +13,11 @@ __pycache__/
 
 #Venv
 /hecktor_venv
+
+/dataset
+/nnUNetTrainer__nnUNetPlans__3d_fullres
+/model
+rfs.joblib
+/test
+
+*.tar.gz
