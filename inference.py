@@ -31,12 +31,13 @@ import os
 import tempfile
 from glob import glob
 from pathlib import Path
-
+import pandas as pd
 import SimpleITK
 import numpy as np
 
 from TN.T import t_from_mask
 from TN.N import n_stage, tumor_side
+import joblib
 
 INPUT_PATH = Path("/input")
 OUTPUT_PATH = Path("/output")
@@ -56,7 +57,7 @@ def run():
     #    Replace the block below with your model's inference logic.
     #    Load your weights from RESOURCE_PATH / "checkpoints".
     # ------------------------------------------------------------------
-    segmentation_array = run_segmentation(ct_path, pet_path, ehr)
+    segmentation_array = run_segmentation(ct_path, pet_path)
 
     write_segmentation(
         location=OUTPUT_PATH / "images/head-neck-tumor-segmentation",
@@ -69,7 +70,7 @@ def run():
     #    Replace the block below with your model's inference logic.
     #    You may use segmentation_array as an additional input.
     # ------------------------------------------------------------------
-    t_stage, n_stage = run_tn_staging(ct_path, pet_path, ehr, segmentation_array)
+    t_stage, n_stage = run_tn_staging(ct_path, segmentation_array)
 
     write_json(location=OUTPUT_PATH / "t-stage.json", data=t_stage)
     write_json(location=OUTPUT_PATH / "n-stage.json", data=n_stage)
@@ -79,7 +80,7 @@ def run():
     #    Replace the block below with your model's inference logic.
     #    You may use segmentation_array and tn stage as additional inputs.
     # ------------------------------------------------------------------
-    rfs_score = run_prognosis(ct_path, pet_path, ehr, segmentation_array, t_stage, n_stage)
+    rfs_score = run_prognosis(ehr)
 
     write_json(location=OUTPUT_PATH / "rfs.json", data=float(rfs_score))
 
@@ -108,7 +109,7 @@ def _sitk_affine_zyx(sitk_image):
     return affine
 
 
-def run_segmentation(ct_path, pet_path, ehr):
+def run_segmentation(ct_path, pet_path):
     """
     Charge le modèle nnUNet depuis MODEL_PATH et prédit la segmentation.
     Retourne un tableau numpy ZYX avec les labels : 0=background, 1=GTVp, 2=GTVn.
@@ -118,7 +119,7 @@ def run_segmentation(ct_path, pet_path, ehr):
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model_folder = str(
-        MODEL_PATH / "Dataset001_HECKTOR" / "nnUNetTrainer__nnUNetPlans__3d_fullres"
+        MODEL_PATH / "nnUNetTrainer__nnUNetPlans__3d_fullres"
     )
 
     predictor = nnUNetPredictor(
@@ -151,7 +152,7 @@ def run_segmentation(ct_path, pet_path, ehr):
         return SimpleITK.GetArrayFromImage(seg_img).astype(np.uint8)
 
 
-def run_tn_staging(ct_path, pet_path, ehr, segmentation_array):
+def run_tn_staging(ct_path, segmentation_array):
     """
     Load your TN staging model from MODEL_PATH and run inference.
     Returns (t_stage: str, n_stage: str), e.g. ("T2", "N1").
@@ -169,21 +170,27 @@ def run_tn_staging(ct_path, pet_path, ehr, segmentation_array):
     return t, n
 
 
-def run_prognosis(ct_path, pet_path, ehr, segmentation_array, t_stage, n_stage):
+def run_prognosis(ehr):
     """
     Load your prognosis model from MODEL_PATH and run inference.
     Returns a float RFS Time. The output should be anti-concordant with the predicted risk score (i.e., the model should output RFS in days)
     """
-    # TODO: replace with your prognosis model inference
-    prediction = 0.0
+    model = joblib.load(MODEL_PATH / "rfs.joblib")
+    features = pd.DataFrame([{
+        "Age": ehr["Age"],
+        "Gender": ehr["Gender"],
+        "Tobacco Consumption": ehr["Tobacco Consumption"],
+        "Alcohol Consumption": ehr["Alcohol Consumption"],
+        "Performance Status": ehr["Performance Status"],
+        "HPV Status": ehr["HPV Status"],
+        "Treatment": ehr["Treatment"],
+    }])
+    risk_score = model.predict(features)[0]
 
-    # If the model predicts a risk score:
-    # prediction = -1.0 * prediction
+    # RandomSurvivalForest.predict returns a risk score (higher = shorter RFS),
+    # so it must be negated to be anti-concordant with the predicted risk.
+    return -1.0 * risk_score
 
-    # If the model already predicts RFS time in days:
-    # return prediction
-
-    return prediction
 
 # =============================================================================
 # I/O utilities

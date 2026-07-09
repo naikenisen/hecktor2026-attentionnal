@@ -1,11 +1,13 @@
-import os
 import numpy as np
 import pandas as pd
-from sksurv.util import Surv
-from sksurv.ensemble import RandomSurvivalForest
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
+from sksurv.util import Surv
+from sksurv.ensemble import RandomSurvivalForest
 from lifelines.utils import concordance_index
+import joblib
 
 CSV_PATH = "tables/HECKTOR_2026_training_data.csv"
 CLEAN_CSV_PATH = "tables/clinical_clean.csv"
@@ -20,11 +22,13 @@ BASE_COLUMNS = [
     "HPV Status",
     "Treatment",
 ]
+ALL_FEATURES = [AGE_COLUMN] + BASE_COLUMNS
+
 PARAM_GRID = {
-    "n_estimators": [300, 600],
-    "max_depth": [5, 10, 20, None],
-    "max_features": ["sqrt", "log2"],
-    "min_samples_leaf": [4, 8],
+    "rf__n_estimators":    [300, 600],
+    "rf__max_depth":       [5, 10, 20, None],
+    "rf__max_features":    ["sqrt", "log2"],
+    "rf__min_samples_leaf":[4, 8],
 }
 
 
@@ -46,34 +50,48 @@ def bootstrap_c_index(risk_scores, times, events, n=1000, seed=42) -> tuple[floa
     return float(np.percentile(samples, 2.5)), float(np.percentile(samples, 97.5))
 
 
-# Preprocessing
+# Nettoyage du CSV source
 raw = pd.read_csv(CSV_PATH)
 clean = raw.drop(columns=["T-stage", "N-stage"]).dropna().reset_index(drop=True)
 clean.to_csv(CLEAN_CSV_PATH, index=False)
 
-
-# chargemennt du dataset
 df = pd.read_csv(CLEAN_CSV_PATH)
 train = df[df["split"] == "train"]
-test = df[df["split"] == "test"]
-scaler = StandardScaler().fit(train[[AGE_COLUMN]])
-encoder = OneHotEncoder(handle_unknown="ignore").fit(train[BASE_COLUMNS])
-X_train = np.hstack([scaler.transform(train[[AGE_COLUMN]]), encoder.transform(train[BASE_COLUMNS]).toarray()])
-X_test = np.hstack([scaler.transform(test[[AGE_COLUMN]]), encoder.transform(test[BASE_COLUMNS]).toarray()])
+test  = df[df["split"] == "test"]
+
+X_train = train[ALL_FEATURES]
+X_test  = test[ALL_FEATURES]
 y_train = Surv.from_arrays(event=train["Relapse"].astype(bool), time=train["RFS"])
 
-# Training
-folds = list(StratifiedKFold(3, shuffle=True, random_state=RF_SEED).split(X_train, y_train["event"]))
+# Pipeline complet : préprocessing + modèle dans un seul objet
+preproc = ColumnTransformer([
+    ("age", StandardScaler(),                        [AGE_COLUMN]),
+    ("cat", OneHotEncoder(handle_unknown="ignore"),  BASE_COLUMNS),
+])
+pipe = Pipeline([
+    ("preproc", preproc),
+    ("rf",      RandomSurvivalForest(random_state=RF_SEED, n_jobs=-1)),
+])
+
+folds = list(
+    StratifiedKFold(3, shuffle=True, random_state=RF_SEED)
+    .split(X_train, train["Relapse"].astype(bool))
+)
 search = GridSearchCV(
-    RandomSurvivalForest(random_state=RF_SEED, n_jobs=-1),
-    PARAM_GRID, cv=folds, error_score=0.0, refit=True, n_jobs=1,
+    pipe, PARAM_GRID,
+    cv=folds, error_score=0.0, refit=True, n_jobs=1,
 )
 search.fit(X_train, y_train)
 model = search.best_estimator_
+print(f"Best hyperparameters: {search.best_params_}")
+
 t_train, e_train = train["RFS"].to_numpy(float), train["Relapse"].to_numpy(float)
-t_test, e_test = test["RFS"].to_numpy(float), test["Relapse"].to_numpy(float)
-c_train = c_index(model.predict(X_train), t_train, e_train)
+t_test,  e_test  = test["RFS"].to_numpy(float),  test["Relapse"].to_numpy(float)
+c_train   = c_index(model.predict(X_train), t_train, e_train)
 risk_test = model.predict(X_test)
-c_test = c_index(risk_test, t_test, e_test)
-lo, hi = bootstrap_c_index(risk_test, t_test, e_test)
+c_test    = c_index(risk_test, t_test, e_test)
+lo, hi    = bootstrap_c_index(risk_test, t_test, e_test)
 print(f"train {c_train:.4f}, test {c_test:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
+
+joblib.dump(model, "rfs.joblib")
+print("modèle sauvegardé → rfs.joblib")
