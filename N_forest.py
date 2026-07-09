@@ -17,6 +17,7 @@ Lancement (depuis la racine du dépôt, après `python -m TN.N_features`) :
     python -m TN.N_forest
 """
 import os
+import joblib
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -27,6 +28,7 @@ from sklearn.metrics import confusion_matrix, balanced_accuracy_score
 
 import seg.config as config
 from TN.N_features import OUTPUT_CSV as FEATURES_CSV
+import joblib
 
 FIG_PATH = "figures/confusion_N_forest.png"
 FEATURE_COLUMNS = ["n_nodes", "largest_node_mm", "nodes_ipsilateral"]
@@ -67,7 +69,7 @@ def plot_confusion(y_true, y_pred, labels, title, path):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fig.savefig(path, dpi=150)
     plt.close(fig)
-    print(f"matrice de confusion → {path}")
+    print(f"matrice de confusion -> {path}")
 
 
 def main():
@@ -76,12 +78,8 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=TEST_SIZE, stratify=y, random_state=config.rf_seed)
 
-    folds = list(
-        StratifiedKFold(3, shuffle=True, random_state=config.rf_seed).split(X_train, y_train))
-    search = GridSearchCV(
-        RandomForestClassifier(random_state=config.rf_seed, n_jobs=-1),
-        PARAM_GRID, cv=folds, n_jobs=1,
-    )
+    
+    search = RandomForestClassifier(max_depth=3, min_samples_leaf=1, n_estimators=50, random_state=config.rf_seed, n_jobs=-1)
     search.fit(X_train, y_train)
     model = search.best_estimator_
     print(f"meilleurs hyperparamètres : {search.best_params_}")
@@ -94,6 +92,9 @@ def main():
     labels = sorted(set(y_train) | set(y_test))
     plot_confusion(y_test, model.predict(X_test), labels,
                    f"Stade N (RandomForest, features masque) — bal.acc {test_acc:.3f}", FIG_PATH)
+    
+    joblib.dump(model, "n-staging.joblib")
+    print("modèle sauvegardé → n-staging.joblib")
 
 
 if __name__ == "__main__":
