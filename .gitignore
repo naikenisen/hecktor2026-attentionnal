@@ -10,3 +10,6 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+#Venv
+/hecktor_venv

@@ -9,8 +9,8 @@ pandas
 scipy
 matplotlib
 lifelines
-scikit-learn==1.9.0
-scikit-survival==0.28.0
+scikit-learn
+scikit-survival
 joblib
 tqdm
 einops
