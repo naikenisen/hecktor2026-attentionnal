@@ -36,7 +36,7 @@ import SimpleITK
 import numpy as np
 
 from TN.T import t_from_mask
-from TN.N import n_stage, tumor_side
+from TN.N import n_stage, tumor_side, node_features
 import joblib
 
 INPUT_PATH = Path("/input")
@@ -166,7 +166,15 @@ def run_tn_staging(ct_path, segmentation_array):
     gtvn = (segmentation_array == 2).astype(np.uint8)
 
     t = t_from_mask(segmentation_array, affine, spacing)
-    n = n_stage(gtvn, affine, tumor_side(gtvp, affine))
+    model_rf_nodes = joblib.load(MODEL_PATH / "n-staging.joblib")
+    n_nodes, largest_node_mm, nodes_ipsilateral = node_features(gtvn, affine, tumor_side(gtvp, affine))
+    features_n = pd.DataFrame([{
+        "n_nodes": n_nodes,
+        "largest_node_mm": largest_node_mm,
+        "nodes_ipsilateral": nodes_ipsilateral,
+    }])
+    n = model_rf_nodes.predict(features_n)[0]
+    # n = n_stage(gtvn, affine, tumor_side(gtvp, affine))
     return t, n
 
 

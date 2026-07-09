@@ -99,6 +99,32 @@ def n_stage(gtvn: np.ndarray, affine: np.ndarray, t_side) -> str:
     return "N1" if sides == {t_side} else "N2"
 
 
+def node_features(gtvn: np.ndarray, affine: np.ndarray, t_side) -> tuple:
+    """Nombre de ganglions, plus grand diamètre (mm) et latéralité par rapport à la tumeur.
+
+    Renvoie `(n_nodes, largest_node_mm, nodes_ipsilateral)`. `nodes_ipsilateral` est True
+    seulement si TOUS les ganglions sont du même côté que la tumeur (`t_side`) ; False s'il y
+    en a au moins un controlatéral (ou bilatéral), si `t_side` est inconnu, ou s'il n'y a aucun
+    ganglion.
+    """
+    if gtvn.sum() == 0:
+        return 0, 0.0, False
+
+    axis = lr_axis(affine)
+    midline = midline_index(affine, axis)
+    components, n_nodes = connected_components(gtvn)
+
+    largest_node_mm = 0.0
+    sides = set()
+    for k in range(1, n_nodes + 1):
+        node = components == k
+        largest_node_mm = max(largest_node_mm, max_diameter_mm(node, affine))
+        sides.add(np.argwhere(node)[:, axis].mean() < midline)
+
+    nodes_ipsilateral = t_side is not None and sides == {t_side}
+    return n_nodes, largest_node_mm, nodes_ipsilateral
+
+
 def plot_confusion(y_true, y_pred, labels, title, path):
     """Matrice de confusion annotée (vérité en lignes, prédiction en colonnes)."""
     cm = confusion_matrix(y_true, y_pred, labels=labels)

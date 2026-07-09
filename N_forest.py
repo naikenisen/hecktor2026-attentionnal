@@ -79,10 +79,8 @@ def main():
         X, y, test_size=TEST_SIZE, stratify=y, random_state=config.rf_seed)
 
     
-    search = RandomForestClassifier(max_depth=3, min_samples_leaf=1, n_estimators=50, random_state=config.rf_seed, n_jobs=-1)
-    search.fit(X_train, y_train)
-    model = search.best_estimator_
-    print(f"meilleurs hyperparamètres : {search.best_params_}")
+    model = RandomForestClassifier(max_depth=3, min_samples_leaf=1, n_estimators=50, random_state=config.rf_seed, n_jobs=-1)
+    model.fit(X_train, y_train)
 
     train_acc = balanced_accuracy_score(y_train, model.predict(X_train))
     test_acc = balanced_accuracy_score(y_test, model.predict(X_test))
